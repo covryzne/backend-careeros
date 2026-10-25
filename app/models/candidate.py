@@ -15,6 +15,15 @@ class TimestampMixin:
     )
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CandidateProfile(TimestampMixin, Base):
     __tablename__ = "candidate_profiles"
 
@@ -26,6 +35,7 @@ class CandidateProfile(TimestampMixin, Base):
     place_of_birth: Mapped[str | None] = mapped_column(String(120))
     date_of_birth: Mapped[date | None] = mapped_column(Date)
     headline: Mapped[str | None] = mapped_column(String(240))
+    location: Mapped[str | None] = mapped_column(String(240))
     professional_summary: Mapped[str | None] = mapped_column(Text)
     preferred_work_arrangement: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
     preferred_salary_min: Mapped[float | None] = mapped_column(Numeric(14, 2))
@@ -45,6 +55,21 @@ class CandidateProfile(TimestampMixin, Base):
     facts: Mapped[list["CandidateFact"]] = relationship(
         back_populates="profile", cascade="all, delete-orphan"
     )
+    preferences: Mapped[list["CandidatePreference"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
+
+
+class CandidatePreference(Base):
+    __tablename__ = "candidate_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("candidate_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    preference_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    value: Mapped[str] = mapped_column(String(200), nullable=False)
+    profile: Mapped[CandidateProfile] = relationship(back_populates="preferences")
 
 
 class CandidateSkill(Base):
@@ -107,4 +132,3 @@ class CandidateFact(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     profile: Mapped[CandidateProfile] = relationship(back_populates="facts")
-

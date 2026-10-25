@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,6 +29,16 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
+@app.get("/", tags=["health"])
+def root() -> dict[str, str]:
+    return {
+        "service": "backend-careeros",
+        "message": "CareerOS API is running",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 @app.get("/health", tags=["health"])
 def health() -> dict[str, str]:
     return {
@@ -31,3 +48,6 @@ def health() -> dict[str, str]:
         "database": database_health(),
     }
 
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8001)

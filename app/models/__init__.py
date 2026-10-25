@@ -1,9 +1,11 @@
 from app.models.candidate import (
     CandidateExperience,
     CandidateFact,
+    CandidatePreference,
     CandidateProfile,
     CandidateProject,
     CandidateSkill,
+    User,
 )
 from app.models.workflow import (
     AgentRun,
@@ -26,6 +28,7 @@ __all__ = [
     "AuditEvent",
     "CandidateExperience",
     "CandidateFact",
+    "CandidatePreference",
     "CandidateProfile",
     "CandidateProject",
     "CandidateSkill",
@@ -34,4 +37,5 @@ __all__ = [
     "JobSkill",
     "JobSource",
     "Reminder",
+    "User",
 ]

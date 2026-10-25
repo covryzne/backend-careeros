@@ -1,16 +1,23 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    database_url: str = "postgresql+psycopg://careeros:careeros@localhost:5432/careeros"
+    database_url: str = "postgresql+psycopg://careeros:careeros@localhost:5434/careeros"
     api_v1_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=BACKEND_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -26,4 +33,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-
