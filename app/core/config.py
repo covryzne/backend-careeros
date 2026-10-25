@@ -9,7 +9,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    database_url: str = "postgresql+psycopg://careeros:careeros@localhost:5434/careeros"
+    database_url: str
     api_v1_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
 

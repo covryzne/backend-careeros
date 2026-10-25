@@ -44,7 +44,7 @@ class Job(Base):
     posting_date: Mapped[date | None] = mapped_column(Date)
     application_deadline: Mapped[date | None] = mapped_column(Date)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="saved", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="new", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

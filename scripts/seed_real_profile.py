@@ -32,6 +32,9 @@ PROFILE = {
         "RAG, AI agents, model evaluation, inference, and production deployment."
     ),
     "preferred_work_arrangement": "flexible",
+    "preferred_salary_min": None,
+    "preferred_salary_max": None,
+    "salary_currency": None,
     "preferred_titles": [
         "AI Engineer",
         "LLM Engineer",

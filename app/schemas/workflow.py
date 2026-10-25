@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(StrEnum):
+    NEW = "new"
     SAVED = "saved"
     INTERESTED = "interested"
     DISMISSED = "dismissed"
@@ -39,6 +40,14 @@ class JobCreate(BaseModel):
     original_url: str | None = None
     description: str | None = None
     location: str | None = None
+    work_arrangement: str = "unknown"
+    employment_type: str = "unknown"
+    salary_text: str | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    source_name: str | None = None
+    skills: list[str] = []
     status: JobStatus = JobStatus.SAVED
 
 
@@ -48,6 +57,38 @@ class JobUpdate(BaseModel):
     description: str | None = None
     notes: str | None = None
     status: JobStatus | None = None
+
+
+class JobSummary(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    title: str
+    company: str
+    original_url: str | None
+    location: str | None
+    work_arrangement: str
+    employment_type: str
+    salary_text: str | None
+    salary_min: float | None
+    salary_max: float | None
+    salary_currency: str | None
+    posting_date: date | None
+    application_deadline: date | None
+    discovered_at: datetime
+    status: JobStatus
+    source_id: uuid.UUID | None
+    source_name: str | None = None
+    skills: list[str] = []
+    match_score: float | None = None
+
+
+class JobListResponse(BaseModel):
+    items: list[JobSummary]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class ApplicationCreate(BaseModel):
