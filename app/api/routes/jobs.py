@@ -11,6 +11,7 @@ from app.api.routes.profile import LOCAL_OWNER_ID
 from app.db.session import get_db
 from app.models.workflow import Job, JobMatch, JobSkill, JobSource
 from app.schemas.workflow import JobCreate, JobListResponse, JobStatus, JobSummary, JobUpdate
+from app.services.jobs import summarize_job as _summary
 
 router = APIRouter()
 
@@ -54,17 +55,6 @@ def delete_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Job not found")
     job.deleted_at = datetime.now(UTC)
     db.commit()
-
-
-def _summary(db: Session, job: Job) -> JobSummary:
-    source_name = db.scalar(select(JobSource.name).where(JobSource.id == job.source_id))
-    skills = db.scalars(select(JobSkill.name).where(JobSkill.job_id == job.id).order_by(JobSkill.name)).all()
-    score = db.scalar(select(JobMatch.score).where(JobMatch.job_id == job.id, JobMatch.owner_id == LOCAL_OWNER_ID).order_by(JobMatch.calculated_at.desc()))
-    return JobSummary.model_validate({
-        **{column.name: getattr(job, column.name) for column in Job.__table__.columns},
-        "source_name": source_name, "skills": skills,
-        "match_score": float(score) if score is not None else None,
-    })
 
 
 @router.get("", response_model=JobListResponse)
