@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -40,19 +40,32 @@ class JobCreate(BaseModel):
     company: str = Field(min_length=1, max_length=240)
     original_url: str | None = None
     description: str | None = None
-    location: str | None = None
-    work_arrangement: str = "unknown"
-    employment_type: str = "unknown"
-    salary_text: str | None = None
-    salary_min: float | None = None
-    salary_max: float | None = None
-    salary_currency: str | None = None
-    source_name: str | None = None
-    skills: list[str] = []
+    location: str | None = Field(default=None, max_length=240)
+    work_arrangement: Literal["unknown", "remote", "hybrid", "on_site", "flexible"] = "unknown"
+    employment_type: Literal[
+        "unknown", "full_time", "part_time", "contract", "internship", "temporary"
+    ] = "unknown"
+    salary_text: str | None = Field(default=None, max_length=200)
+    salary_min: float | None = Field(default=None, ge=0, le=999999999999.99)
+    salary_max: float | None = Field(default=None, ge=0, le=999999999999.99)
+    salary_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    source_name: str | None = Field(default=None, max_length=120)
+    skills: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(
+        default_factory=list, max_length=100
+    )
     status: JobStatus = JobStatus.SAVED
 
 
 class JobUpdate(BaseModel):
+    @model_validator(mode="after")
+    def validate_null(self):
+        if any(
+            getattr(self, key) is None
+            for key in self.model_fields_set & {"title", "company", "status"}
+        ):
+            raise ValueError("Required job fields cannot be null")
+        return self
+
     title: str | None = Field(default=None, min_length=1, max_length=240)
     company: str | None = Field(default=None, min_length=1, max_length=240)
     description: str | None = None
@@ -82,6 +95,8 @@ class JobSummary(BaseModel):
     source_name: str | None = None
     skills: list[str] = []
     match_score: float | None = None
+    match_profile_version: int | None = None
+    is_match_stale: bool = False
 
 
 class JobListResponse(BaseModel):
@@ -90,6 +105,7 @@ class JobListResponse(BaseModel):
     page_size: int
     total: int
     total_pages: int
+    has_next: bool = False
 
 
 class ApplicationCreate(BaseModel):
@@ -113,16 +129,27 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    selected_document_id: uuid.UUID | None = None
     status: ApplicationStatus | None = None
     follow_up_date: date | None = None
     notes: str | None = None
+    application_date: date | None = None
+    application_channel: ApplicationChannel | None = None
     expected_version: int = Field(ge=1)
     change_kind: Literal["move", "undo"] = "move"
 
     @model_validator(mode="after")
     def validate_undo_payload(self):
         if self.change_kind == "undo" and (
-            self.status is None or self.model_fields_set & {"notes", "follow_up_date"}
+            self.status is None
+            or self.model_fields_set
+            & {
+                "notes",
+                "follow_up_date",
+                "application_date",
+                "application_channel",
+                "selected_document_id",
+            }
         ):
             raise ValueError("Undo requires a target status and cannot edit other fields")
         return self
@@ -162,6 +189,7 @@ class ApplicationListResponse(BaseModel):
     page_size: int
     total: int
     total_pages: int
+    has_next: bool = False
 
 
 class ReminderCreate(BaseModel):
@@ -177,3 +205,19 @@ class AgentRunCreate(BaseModel):
     instruction: str = Field(min_length=1)
     scope: dict = {}
     allowed_tools: list[str] = []
+
+
+class ReminderPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    description: str | None = None
+    due_at: datetime | None = None
+    status: Literal["pending", "completed"] | None = None
+
+    @model_validator(mode="after")
+    def not_null(self):
+        if any(
+            getattr(self, key) is None
+            for key in self.model_fields_set & {"title", "due_at", "status"}
+        ):
+            raise ValueError("Required fields cannot be null")
+        return self

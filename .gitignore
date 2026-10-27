@@ -5,3 +5,5 @@ __pycache__/
 .env
 *.py[cod]
 
+
+.private-documents/

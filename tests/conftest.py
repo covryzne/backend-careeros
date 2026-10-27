@@ -1,4 +1,3 @@
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -7,18 +6,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models.workflow import (
-    Application,
-    ApplicationActivity,
-    AuditEvent,
-    Job,
-    JobMatch,
-    JobSkill,
-    JobSource,
-    Reminder,
-)
+from app.models import candidate, foundation  # noqa: F401
 
 
 @compiles(JSONB, "sqlite")
@@ -36,8 +27,7 @@ def jobs_client():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    for model in (JobSource, Job, JobSkill, JobMatch, Application, ApplicationActivity, AuditEvent, Reminder):
-        model.__table__.create(engine)
+    Base.metadata.create_all(engine)
     with Session(engine) as db:
         app.dependency_overrides[get_db] = lambda: db
         with TestClient(app) as client:
@@ -46,3 +36,8 @@ def jobs_client():
     engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def disable_embedded_worker_for_isolated_tests(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "agent_worker_embedded", False)

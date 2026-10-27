@@ -29,7 +29,7 @@ def test_manual_apply_persists_pipeline_and_preserves_saved_job(jobs_client):
     assert application["application_channel"] == "career_page"
     assert application["follow_up_date"] == "2026-11-02"
     assert application["activities"][0]["activity_type"] == "application_submitted"
-    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+    assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "application")) == 1
     db.expire_all()
     records = client.get("/api/v1/applications").json()
     assert records["total"] == 1
@@ -70,7 +70,7 @@ def test_pipeline_stage_update_is_versioned_and_audited(jobs_client):
     assert client.patch(path, json={"status": "preparing", "expected_version": 2}).status_code == 409
     assert client.patch(path, json={"status": "offer"}).status_code == 422
     assert client.patch(path, json={"status": None, "expected_version": 2}).status_code == 422
-    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 2
+    assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "application")) == 2
     for version, stage in [(2, "interview"), (3, "offer"), (4, "withdrawn")]:
         assert client.patch(path, json={"status": stage, "expected_version": version}).status_code == 200
     assert client.get("/api/v1/applications?status=withdrawn").json()["total"] == 1
@@ -118,11 +118,11 @@ def test_undo_restores_previous_stage_once_without_resubmitting(jobs_client):
         "from": "assessment", "to": "applied", "change_kind": "undo", "version": 3,
     }
     assert sum(item["activity_type"] == "application_submitted" for item in restored["activities"]) == 1
-    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 3
+    assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "application")) == 3
     assert client.patch(path, json=undo).status_code == 409
     assert client.patch(path, json={"status": "assessment", "expected_version": 3,
                                     "change_kind": "undo"}).status_code == 409
-    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 3
+    assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "application")) == 3
 
 
 def test_undo_checks_target_latest_move_and_concurrent_edits(jobs_client):
@@ -169,7 +169,7 @@ def test_same_stage_does_not_consume_version_or_create_undo_event(jobs_client):
     assert response.status_code == 200
     assert response.json()["version"] == 1
     assert len(response.json()["activities"]) == 1
-    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+    assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "application")) == 1
 
 
 def test_applications_respect_owner_and_deleted_job(jobs_client):

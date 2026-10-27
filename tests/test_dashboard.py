@@ -1,7 +1,10 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy import select
+
 from app.api.routes.profile import LOCAL_OWNER_ID
+from app.models.candidate import CandidateProfile
 from app.models.workflow import Application, Job, JobMatch, Reminder
 from app.services.dashboard import JAKARTA, utc_midnight
 
@@ -27,9 +30,15 @@ def add_application(db, job, *, status="applied", follow_up_date=None, applicati
 
 
 def add_match(db, job, score, *, calculated_at=None, owner_id=None, match_id=None):
+    actual_owner = owner_id or job.owner_id
+    profile = db.scalar(select(CandidateProfile).where(CandidateProfile.owner_id == actual_owner))
+    if profile is None:
+        profile = CandidateProfile(owner_id=actual_owner, full_name="Test Candidate")
+        db.add(profile)
+        db.flush()
     match = JobMatch(
-        owner_id=owner_id or job.owner_id, job_id=job.id, profile_id=uuid.uuid4(),
-        profile_version=1, score=score, algorithm_version="test-v1",
+        owner_id=owner_id or job.owner_id, job_id=job.id, profile_id=profile.id,
+        profile_version=1, score=score, algorithm_version="test-" + str(uuid.uuid4()),
         calculated_at=calculated_at or datetime.now(UTC),
     )
     if match_id:
