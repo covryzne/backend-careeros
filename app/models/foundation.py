@@ -69,6 +69,8 @@ class Draft(Base):
     citations: Mapped[list] = mapped_column(JSONB, default=list)
     review_flags: Mapped[list] = mapped_column(JSONB, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    job_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

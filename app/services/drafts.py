@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -30,7 +32,9 @@ def create_draft(db, actor, args, draft_type):
     selected_ids = list(dict.fromkeys(str(value) for value in args.source_ids))
     legacy = False
     if not selected_ids:
-        selected_ids = [item["id"] for item in choices[:20]]
+        from app.services.draft_composer import relevant_sources
+
+        selected_ids = [item["id"] for item in relevant_sources(choices, job)]
     # Compatibility only for historical API callers; facts are not offered by the UI/tools.
     if selected_ids and any(identity not in sources for identity in selected_ids):
         old = {
@@ -50,18 +54,17 @@ def create_draft(db, actor, args, draft_type):
             "Lengkapi profil profesional, skill, project, atau experience sebagai sumber draft.",
         )
     selected = [sources[identity] for identity in selected_ids]
-    intro = (
-        f"Saya tertarik melamar posisi {job['title']} di {job['company']}."
-        if args.language == "id"
-        else f"I am interested in the {job['title']} position at {job['company']}."
-    )
-    content = intro + "\n\n" + "\n".join(item["text"] for item in selected)
+    from app.services.draft_composer import compose
+    from app.services.job_content import snapshot
+
+    content = compose(job, selected, draft_type, args.language, profile)
     draft = Draft(
         owner_id=actor.owner_id,
         job_id=args.job_id,
         source_profile_version=profile.profile_version,
         draft_type=draft_type,
         content=content,
+        job_snapshot=snapshot(job),
         citations=[
             {
                 "source_id": item["id"],
@@ -84,7 +87,9 @@ def create_draft(db, actor, args, draft_type):
 
 def owned_draft(db, actor, draft_id, lock=False):
     actor.require("drafts:read")
-    query = select(Draft).where(Draft.id == draft_id, Draft.owner_id == actor.owner_id)
+    query = select(Draft).where(
+        Draft.id == draft_id, Draft.owner_id == actor.owner_id, Draft.deleted_at.is_(None)
+    )
     item = db.scalar(query.with_for_update() if lock else query)
     if item is None:
         raise HTTPException(404, "Draft not found")
@@ -92,6 +97,14 @@ def owned_draft(db, actor, draft_id, lock=False):
 
 
 def draft_detail(db, actor, draft):
+    from app.services.job_content import snapshot
+
+    try:
+        job = get_job(db, actor, draft.job_id)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        job = None
     profile = load_profile(db, actor)
     versions = db.scalars(
         select(DraftVersion).where(DraftVersion.draft_id == draft.id).order_by(DraftVersion.version)
@@ -107,11 +120,19 @@ def draft_detail(db, actor, draft):
         "review_flags": draft.review_flags,
         "is_stale": profile is None or profile.profile_version != draft.source_profile_version,
         "versions": [{"version": v.version, "content": v.content} for v in versions],
+        "job": {key: job[key] for key in ("id", "title", "company")} if job else None,
+        "job_snapshot": draft.job_snapshot,
+        "is_job_stale": bool(
+            draft.job_snapshot and (job is None or draft.job_snapshot != snapshot(job))
+        ),
+        "composition_method": "local_grounded_template",
     }
 
 
 def edit_draft(db, actor, draft_id, content, expected):
     actor.require("drafts:write")
+    if not content.strip():
+        raise HTTPException(422, "Draft content cannot be blank")
     draft = owned_draft(db, actor, draft_id, lock=True)
     if draft.version != expected:
         raise HTTPException(409, "Draft changed; reload before editing")
@@ -123,6 +144,27 @@ def edit_draft(db, actor, draft_id, content, expected):
         audit(db, actor, "draft_edited", "draft", draft.id, version=draft.version)
     db.flush()
     return draft
+
+
+def delete_draft(db, actor, draft_id, expected):
+    actor.require("drafts:write", approval=True)
+    draft = db.scalar(
+        select(Draft)
+        .where(Draft.id == draft_id, Draft.owner_id == actor.owner_id)
+        .with_for_update()
+    )
+    if draft is None:
+        raise HTTPException(404, "Draft not found")
+    if draft.deleted_at is not None:
+        if expected == draft.version - 1:
+            return
+        raise HTTPException(409, "Draft changed; reload before deleting")
+    if draft.version != expected:
+        raise HTTPException(409, "Draft changed; reload before deleting")
+    draft.deleted_at = datetime.now(UTC)
+    draft.version += 1
+    audit(db, actor, "draft_deleted", "draft", draft.id, version=draft.version)
+    db.flush()
 
 
 def propose_profile(db, actor, args):

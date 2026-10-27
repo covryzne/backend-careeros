@@ -1,113 +1,146 @@
-"""Idempotently seed saved and archived jobs for the local CareerOS database."""
+"""Seed 15 complete demo jobs without requiring a running API server."""
 
+import argparse
+import re
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.routes.profile import LOCAL_OWNER_ID
+from app.core.config import settings
+from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.db.session import SessionLocal
-from app.models.candidate import CandidateProfile, User
-from app.models.workflow import Job, JobMatch, JobSkill, JobSource
+from app.models.workflow import Job, JobMatch, JobSkill
+from app.schemas.workflow import JobCreate
+from app.services import job_workflows, profile
+from app.services.audit import audit
+from app.services.idempotency import lock_owner
+from app.services.professional_sources import draft_sources
+from scripts.seed_data import jobs_for
 
-JOBS = [
-    {
-        "external_job_id": "seed-gojek-frontend",
-        "title": "Senior Frontend Engineer",
-        "company": "Gojek",
-        "original_url": "https://gojek.com/careers",
-        "location": "Jakarta",
-        "work_arrangement": "hybrid",
-        "employment_type": "full_time",
-        "salary_text": "IDR 35–50 juta",
-        "salary_min": 35000000,
-        "salary_max": 50000000,
-        "salary_currency": "IDR",
-        "status": "saved",
-        "skills": ["React", "TypeScript", "Design System"],
-        "match_score": 94,
-    },
-    {
-        "external_job_id": "seed-ajaib-product-designer",
-        "title": "Product Designer, Growth",
-        "company": "Ajaib",
-        "original_url": "https://ajaib.co.id/careers",
-        "location": "Jakarta",
-        "work_arrangement": "remote",
-        "employment_type": "full_time",
-        "salary_text": "IDR 28–42 juta",
-        "salary_min": 28000000,
-        "salary_max": 42000000,
-        "salary_currency": "IDR",
-        "status": "saved",
-        "skills": ["Figma", "Research", "Product Strategy"],
-        "match_score": 91,
-    },
-    {
-        "external_job_id": "seed-kredivo-ux-researcher",
-        "title": "UX Researcher",
-        "company": "Kredivo",
-        "original_url": "https://kredivo.com/careers",
-        "location": "Jakarta",
-        "work_arrangement": "hybrid",
-        "employment_type": "full_time",
-        "salary_text": "IDR 20–30 juta",
-        "salary_min": 20000000,
-        "salary_max": 30000000,
-        "salary_currency": "IDR",
-        "status": "archived",
-        "skills": ["Interview", "Usability", "Insights"],
-        "match_score": 49,
-    },
-]
+JOBS = jobs_for(datetime.now(UTC).date())
+ALGORITHM = "seed-professional-overlap-v2"
 
 
-def main() -> None:
-    with SessionLocal() as db:
-        if db.get(User, LOCAL_OWNER_ID) is None:
-            db.add(User(id=LOCAL_OWNER_ID))
-            db.flush()
-        profile = db.scalar(select(CandidateProfile).where(CandidateProfile.owner_id == LOCAL_OWNER_ID))
-        if profile is None:
-            raise RuntimeError("Candidate profile must be seeded before jobs.")
-        sources = {}
-        for source_name, source_type, base_url in (
-            ("Seeded LinkedIn", "job_board", "https://www.linkedin.com"),
-            ("Seeded Glints", "job_board", "https://glints.com"),
-            ("Seeded Manual", "manual", None),
-        ):
-            source = db.scalar(select(JobSource).where(JobSource.owner_id == LOCAL_OWNER_ID, JobSource.name == source_name))
-            if source is None:
-                source = JobSource(owner_id=LOCAL_OWNER_ID, name=source_name, source_type=source_type, base_url=base_url)
-                db.add(source)
-                db.flush()
-            sources[source_name] = source
-        for data in JOBS:
-            job = db.scalar(select(Job).where(Job.owner_id == LOCAL_OWNER_ID, Job.external_job_id == data["external_job_id"]))
-            source = sources["Seeded Manual"] if data["status"] == "archived" else sources["Seeded LinkedIn"]
-            if job is None:
-                job = Job(
-                    owner_id=LOCAL_OWNER_ID,
-                    source_id=source.id,
-                    discovered_at=datetime.now(UTC),
-                    **{key: value for key, value in data.items() if key not in {"skills", "match_score"}},
+def seed(db, actor=None):
+    actor = actor or ActorContext(LOCAL_OWNER_ID)
+    lock_owner(db, actor)
+    owner = profile.load_profile(db, actor, lock=True)
+    sources = draft_sources(owner)
+    counts = {"created": 0, "restored": 0, "enriched": 0, "matches_created": 0}
+    for record in JOBS:
+        job = db.scalar(
+            select(Job)
+            .where(Job.owner_id == actor.owner_id, Job.external_job_id == record["external_job_id"])
+            .with_for_update()
+        )
+        if job is None:
+            payload = JobCreate.model_validate(
+                {key: value for key, value in record.items() if key in JobCreate.model_fields}
+                | {"source_name": "CareerOS Demo Seeds"}
+            )
+            summary = job_workflows.create_job(db, actor, payload=payload)
+            job = db.get(Job, summary.id)
+            job.external_job_id = record["external_job_id"]
+            job.posting_date = record["posting_date"]
+            job.application_deadline = record["application_deadline"]
+            job.discovered_at = datetime.combine(record["discovered_at"], time(9), tzinfo=UTC)
+            job.notes = record["notes"]
+            counts["created"] += 1
+        else:
+            changed = False
+            if job.deleted_at is not None:
+                job.deleted_at = None
+                job.status = record["status"]
+                counts["restored"] += 1
+                changed = True
+            for key, value in record.items():
+                if key in {"skills", "external_job_id", "status", "discovered_at"}:
+                    continue
+                if getattr(job, key) in (None, ""):
+                    setattr(job, key, value)
+                    changed = True
+            if not job.canonical_url:
+                job.canonical_url = job.original_url
+                changed = True
+            if changed:
+                counts["enriched"] += 1
+                audit(db, actor, "seed_job_enriched", "job", job.id)
+        existing = {
+            value.strip().casefold()
+            for value in db.scalars(select(JobSkill.name).where(JobSkill.job_id == job.id))
+        }
+        for name in record["skills"]:
+            if name.strip().casefold() not in existing:
+                db.add(JobSkill(job_id=job.id, name=name, is_required=True))
+        db.flush()
+        if owner is None:
+            continue
+        prior = db.scalar(
+            select(JobMatch.id).where(
+                JobMatch.owner_id == actor.owner_id,
+                JobMatch.job_id == job.id,
+                JobMatch.profile_version == owner.profile_version,
+                JobMatch.algorithm_version == ALGORITHM,
+            )
+        )
+        if prior:
+            continue
+        matched, missing, evidence = [], [], []
+        for skill in record["skills"]:
+            pattern = re.compile(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", re.IGNORECASE)
+            source = next((item for item in sources if pattern.search(item["text"])), None)
+            (matched if source else missing).append(skill)
+            if source:
+                evidence.append(
+                    {"source_id": source["id"], "kind": source["kind"], "matched_skill": skill}
                 )
-                db.add(job)
-                db.flush()
-            for skill_name in data["skills"]:
-                if db.scalar(select(JobSkill).where(JobSkill.job_id == job.id, JobSkill.name == skill_name)) is None:
-                    db.add(JobSkill(job_id=job.id, name=skill_name, is_required=True))
-            if db.scalar(select(JobMatch).where(JobMatch.job_id == job.id, JobMatch.owner_id == LOCAL_OWNER_ID)) is None:
-                db.add(JobMatch(
-                    owner_id=LOCAL_OWNER_ID, job_id=job.id, profile_id=profile.id,
-                    profile_version=1, score=data["match_score"], matching_skills=data["skills"],
-                    missing_requirements=[], blockers=[], evidence=[], algorithm_version="seed-v1",
-                    calculated_at=datetime.now(UTC),
-                ))
-        db.commit()
+        score = (Decimal(len(matched)) * 100 / len(record["skills"])).quantize(Decimal("0.01"))
+        db.add(
+            JobMatch(
+                owner_id=actor.owner_id,
+                job_id=job.id,
+                profile_id=owner.id,
+                profile_version=owner.profile_version,
+                score=score,
+                matching_skills=matched,
+                missing_requirements=missing,
+                blockers=[],
+                evidence=evidence,
+                algorithm_version=ALGORITHM,
+                calculated_at=datetime.now(UTC),
+            )
+        )
+        counts["matches_created"] += 1
+    db.flush()
+    return {
+        **counts,
+        "seed_jobs": len(JOBS),
+        "profile_version": owner.profile_version if owner else None,
+    }
+
+
+def main():
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    if settings.app_env not in {"development", "test"}:
+        raise SystemExit("Seed jobs hanya untuk database development/test.")
+    try:
+        with SessionLocal.begin() as db:
+            result = seed(db)
+    except SQLAlchemyError:
+        raise SystemExit(
+            "Seed jobs gagal. Periksa DATABASE_URL dan jalankan python -m alembic upgrade head."
+        ) from None
+    print("Jobs demo siap:", result)
+    if result["profile_version"] is None:
+        print(
+            "Profil belum tersedia. Jalankan python seed_real_profile.py lalu ulangi seed_jobs.py untuk skor demo."
+        )
 
 
 if __name__ == "__main__":

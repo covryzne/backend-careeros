@@ -1,14 +1,32 @@
-"""Idempotently seed Shendi Teuku Maulana Efendi through the local profile API.
+"""Seed the existing real professional profile locally, without API/network calls.
 
-Start the backend first and configure DATABASE_URL in backend-careeros/.env.
-This script intentionally stores claims as self-reported unless evidence exists.
+Default: fill missing fields and merge professional children. Use --overwrite
+only to replace populated seed-related fields with the values in this file.
 """
 
-import json
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+import argparse
+import sys
+from pathlib import Path
 
-API_URL = "http://127.0.0.1:8001/api/v1/profile"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.core.config import settings
+from app.core.security import LOCAL_OWNER_ID, ActorContext
+from app.db.session import SessionLocal
+from app.models.candidate import CandidateExperience, CandidateProject, CandidateSkill
+from app.schemas.profile import (
+    CandidateExperienceCreate,
+    CandidateExperienceUpdate,
+    CandidateProjectCreate,
+    CandidateProjectUpdate,
+    CandidateSkillCreate,
+    CandidateSkillUpdate,
+    ProfileUpdate,
+)
+from app.services import profile
+from app.services.idempotency import lock_owner
 
 PROFILE = {
     "full_name": "Shendi Teuku Maulana Efendi",
@@ -48,14 +66,35 @@ PROFILE = {
 }
 
 SKILLS = [
-    "Python", "Machine Learning", "Deep Learning", "Computer Vision",
-    "Natural Language Processing", "Large Language Models (LLMs)", "Generative AI",
-    "LLM fine-tuning: CPT, SFT, LoRA, and quantization", "Model evaluation",
-    "OCR-related processing", "Retrieval-Augmented Generation (RAG)",
-    "Embeddings and semantic search", "AI agent workflows", "Tool integration and orchestration",
-    "Hugging Face", "FastAPI", "REST APIs", "PostgreSQL", "SQL",
-    "Data processing and web crawling", "Docker and Docker Compose", "Linux VPS deployment",
-    "MinIO", "PyTorch", "scikit-learn", "pandas", "Git", "React", "TypeScript",
+    "Python",
+    "Machine Learning",
+    "Deep Learning",
+    "Computer Vision",
+    "Natural Language Processing",
+    "Large Language Models (LLMs)",
+    "Generative AI",
+    "LLM fine-tuning: CPT, SFT, LoRA, and quantization",
+    "Model evaluation",
+    "OCR-related processing",
+    "Retrieval-Augmented Generation (RAG)",
+    "Embeddings and semantic search",
+    "AI agent workflows",
+    "Tool integration and orchestration",
+    "Hugging Face",
+    "FastAPI",
+    "REST APIs",
+    "PostgreSQL",
+    "SQL",
+    "Data processing and web crawling",
+    "Docker and Docker Compose",
+    "Linux VPS deployment",
+    "MinIO",
+    "PyTorch",
+    "scikit-learn",
+    "pandas",
+    "Git",
+    "React",
+    "TypeScript",
 ]
 
 EXPERIENCES = [
@@ -129,7 +168,7 @@ PROJECTS = [
         "description": (
             "Worked with a continued-pretraining corpus of approximately 92 million "
             "tokens and LLM training workflows involving CPT, SFT, LoRA, and 4-bit "
-            "quantization. The available schema does not yet provide structured project-skill relations."
+            "quantization."
         ),
         "url": None,
         "is_verified": False,
@@ -157,63 +196,133 @@ PROJECTS = [
     },
 ]
 
-FACTS = [
-    ("Education", "Graduated from Universitas PGRI Madiun with a Bachelor's degree in Informatics Engineering, GPA 3.87/4.00, in 2025."),
-    ("Experience", "Completed the AI Engineer internship at Komdigi in May 2026."),
-    ("Experience", "Contributed to a crawling pipeline capable of extracting up to approximately 6,000 URLs per day under its tested configuration."),
-    ("LLM", "Worked with an LLM continued-pretraining corpus containing approximately 92 million tokens."),
-    ("Computer Vision", "Worked on a Vision Transformer image classifier evaluated on approximately 10,700 web screenshots."),
-    ("Data Science", "Contributed to a healthcare predictive-modeling project with reported recall around 0.89 and ROC-AUC around 0.86."),
-]
+
+def normalized(value):
+    return str(value or "").strip().casefold()
 
 
-def request(path: str, method: str = "GET", payload: dict | None = None) -> dict:
-    body = None if payload is None else json.dumps(payload).encode()
-    request_object = Request(
-        f"{API_URL}{path}",
-        data=body,
-        method=method,
-        headers={"Content-Type": "application/json"},
-    )
-    with urlopen(request_object, timeout=10) as response:
-        return json.loads(response.read()) if response.status != 204 else {}
-
-
-def upsert_children(profile: dict, collection: str, records: list[dict], key_fields: tuple[str, ...]) -> None:
-    existing = profile[collection]
-    for record in records:
-        if any(all(item.get(field) == record.get(field) for field in key_fields) for item in existing):
+def seed(db, actor=None, *, overwrite=False):
+    actor = actor or ActorContext(LOCAL_OWNER_ID)
+    lock_owner(db, actor)
+    owner = profile.load_profile(db, actor, lock=True)
+    values = {}
+    for key, value in PROFILE.items():
+        if value is None:
             continue
-        created = request(f"/{collection}", "POST", record)
-        existing.append(created)
+        if key in {"preferred_titles", "preferred_locations"}:
+            category = "title" if key == "preferred_titles" else "location"
+            empty = owner is None or not any(
+                item.preference_type == category for item in owner.preferences
+            )
+        else:
+            old = getattr(owner, key, None) if owner else None
+            empty = old in (None, "") or key == "preferred_work_arrangement" and old == "unknown"
+        if overwrite or empty:
+            values[key] = value
+    owner = profile.update_profile(
+        db,
+        actor,
+        ProfileUpdate.model_validate(values),
+        expected=owner.profile_version if owner else None,
+    )
+    created = {"skills": 0, "experiences": 0, "projects": 0}
+    for collection, records, model, create_schema, update_schema, keys in (
+        (
+            "skills",
+            [{"name": name} for name in SKILLS],
+            CandidateSkill,
+            CandidateSkillCreate,
+            CandidateSkillUpdate,
+            ("name",),
+        ),
+        (
+            "experiences",
+            EXPERIENCES,
+            CandidateExperience,
+            CandidateExperienceCreate,
+            CandidateExperienceUpdate,
+            ("role", "company", "start_date"),
+        ),
+        (
+            "projects",
+            PROJECTS,
+            CandidateProject,
+            CandidateProjectCreate,
+            CandidateProjectUpdate,
+            ("name",),
+        ),
+    ):
+        for record in records:
+            owner = profile.load_profile(db, actor, lock=True)
+            row = next(
+                (
+                    item
+                    for item in getattr(owner, collection)
+                    if all(
+                        normalized(getattr(item, key)) == normalized(record.get(key))
+                        for key in keys
+                    )
+                ),
+                None,
+            )
+            if row is None:
+                profile.mutate_child(
+                    db,
+                    actor,
+                    model,
+                    "create",
+                    payload=create_schema.model_validate(record),
+                    expected=owner.profile_version,
+                )
+                created[collection] += 1
+            else:
+                updates = {
+                    key: value
+                    for key, value in record.items()
+                    if (value is not None or overwrite)
+                    and key not in {*keys, "is_verified", "evidence_reference"}
+                    and (overwrite or getattr(row, key) in (None, ""))
+                }
+                if updates:
+                    profile.mutate_child(
+                        db,
+                        actor,
+                        model,
+                        "update",
+                        item_id=row.id,
+                        payload=update_schema.model_validate(updates),
+                        expected=owner.profile_version,
+                    )
+    owner = profile.load_profile(db, actor)
+    return {
+        "created": created,
+        "profile_version": owner.profile_version,
+        "totals": {key: len(getattr(owner, key)) for key in created},
+    }
 
 
-def main() -> None:
-    profile = request("", "PATCH", PROFILE)
-    upsert_children(profile, "skills", [
-        {"name": name, "proficiency": None, "years_experience": None, "is_verified": False}
-        for name in SKILLS
-    ], ("name",))
-    upsert_children(profile, "experiences", EXPERIENCES, ("role", "company", "start_date"))
-    upsert_children(profile, "projects", PROJECTS, ("name",))
-    upsert_children(profile, "facts", [
-        {
-            "category": category,
-            "claim": claim,
-            "evidence_reference": None,
-            "is_verified": False,
-            "verified_at": None,
-        }
-        for category, claim in FACTS
-    ], ("category", "claim"))
-    print(json.dumps(request(""), indent=2))
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace populated seed-related profile fields; retain unrelated records.",
+    )
+    args = parser.parse_args()
+    if settings.app_env not in {"development", "test"}:
+        raise SystemExit("Seed profile hanya untuk database development/test.")
+    try:
+        with SessionLocal.begin() as db:
+            result = seed(db, overwrite=args.overwrite)
+    except SQLAlchemyError:
+        raise SystemExit(
+            "Seed profile gagal. Periksa DATABASE_URL dan jalankan python -m alembic upgrade head."
+        ) from None
+    print("Profil profesional siap:", result)
+    print(
+        "Data profil, skills, experience, dan project digunakan langsung. Tidak membuat Verified Facts atau PDF/CV palsu."
+    )
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except (HTTPError, URLError) as error:
-        raise SystemExit(
-            "Profile seed failed. Start the backend and configure DATABASE_URL in .env: "
-            f"{error}"
-        ) from error
+    main()

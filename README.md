@@ -20,6 +20,46 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 
 Health: `/health`; interactive schema: `/docs`; generated contract: `/openapi.json`.
 
+## Local seed data
+
+From `backend-careeros`, with the virtual environment active and `DATABASE_URL`
+configured in `.env`, run:
+
+```powershell
+python -m alembic upgrade head
+python seed_real_profile.py
+python seed_jobs.py
+```
+
+The API server does not need to be running. Both scripts use the same local owner
+and shared services as the application. The original entry points
+`python scripts/seed_real_profile.py` and `python scripts/seed_jobs.py` also work.
+
+The jobs seeder creates 15 complete demo jobs: 6 new, 6 saved, and 3 archived on a
+fresh database. It includes description, requirements, responsibilities/job desk,
+experience requirements, preferred qualifications, HR name/email/phone, skills,
+salary, work arrangement, employment type, source, URLs, posting/deadline dates,
+discovery time and notes. Example URLs/emails and reserved example phone numbers
+are demonstration contacts; these are not live vacancies or actual employer pay.
+The original three seed identities are retained for compatibility.
+
+Rerunning does not create duplicate jobs/skills/profile children. It fills missing
+seed job fields, restores soft-deleted seed jobs with their original IDs, and
+preserves active job statuses, edited non-empty content, unrelated jobs and
+application history. Existing jobs beyond these 15 are retained. If run before a
+profile exists, jobs are still seeded; rerun after seeding the profile to create
+illustrative match scores at the current profile version. The demo score uses
+professional-source keyword overlap and is explicitly versioned as
+`seed-professional-overlap-v2`; it is not the production matching algorithm.
+
+The profile seeder fills missing profile/preferences and merges the existing real
+seed skills, experiences and projects. It creates no Verified Facts or artificial
+PDFs. It preserves populated personal/professional fields by default. To explicitly
+replace seed-related populated fields with this file's values, use
+`python seed_real_profile.py --overwrite`; unrelated child records remain intact.
+Unknown birth/salary fields remain unset. Scripts run transactionally against the
+configured development/test database and never print private profile/contact data.
+
 ```powershell
 python -m pytest -q
 python -m ruff check app tests scripts/verify_foundation.py scripts/export_openapi.py

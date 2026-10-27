@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import date, datetime
 from enum import StrEnum
@@ -35,7 +36,30 @@ class ApplicationChannel(StrEnum):
     OTHER = "other"
 
 
-class JobCreate(BaseModel):
+class JobContentInput(BaseModel):
+    responsibilities: str | None = Field(default=None, max_length=50000)
+    requirements: str | None = Field(default=None, max_length=50000)
+    experience_requirements: str | None = Field(default=None, max_length=30000)
+    preferred_qualifications: str | None = Field(default=None, max_length=30000)
+    hr_contact_name: str | None = Field(default=None, max_length=200)
+    hr_contact_email: str | None = Field(
+        default=None, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
+    )
+    hr_contact_phone: str | None = Field(
+        default=None, max_length=50, pattern=r"^\+?[\d ().-]{8,50}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_contact_phone(self):
+        if (
+            self.hr_contact_phone is not None
+            and not 8 <= len(re.sub(r"\D", "", self.hr_contact_phone)) <= 16
+        ):
+            raise ValueError("Contact phone must contain 8–16 digits")
+        return self
+
+
+class JobCreate(JobContentInput):
     title: str = Field(min_length=1, max_length=240)
     company: str = Field(min_length=1, max_length=240)
     original_url: str | None = None
@@ -56,7 +80,7 @@ class JobCreate(BaseModel):
     status: JobStatus = JobStatus.SAVED
 
 
-class JobUpdate(BaseModel):
+class JobUpdate(JobContentInput):
     @model_validator(mode="after")
     def validate_null(self):
         if any(
@@ -97,6 +121,18 @@ class JobSummary(BaseModel):
     match_score: float | None = None
     match_profile_version: int | None = None
     is_match_stale: bool = False
+
+
+class JobDetail(JobSummary):
+    description: str | None = None
+    notes: str | None = None
+    requirements: str | None = None
+    responsibilities: str | None = None
+    experience_requirements: str | None = None
+    preferred_qualifications: str | None = None
+    hr_contact_name: str | None = None
+    hr_contact_email: str | None = None
+    hr_contact_phone: str | None = None
 
 
 class JobListResponse(BaseModel):

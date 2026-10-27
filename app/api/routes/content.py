@@ -9,6 +9,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -202,7 +203,7 @@ def list_drafts(db: Session = Depends(get_db), actor: ActorContext = Depends(get
     actor.require("drafts:read")
     items = db.scalars(
         select(Draft)
-        .where(Draft.owner_id == actor.owner_id)
+        .where(Draft.owner_id == actor.owner_id, Draft.deleted_at.is_(None))
         .order_by(Draft.created_at.desc())
         .limit(20)
     ).all()
@@ -226,6 +227,17 @@ def edit_draft(
     item = drafts.edit_draft(db, actor, draft_id, payload.content, payload.expected_version)
     db.commit()
     return drafts.draft_detail(db, actor, item)
+
+
+@router.delete("/drafts/{draft_id}", status_code=204)
+def delete_draft(
+    draft_id: uuid.UUID,
+    expected_version: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    drafts.delete_draft(db, actor, draft_id, expected_version)
+    db.commit()
 
 
 @router.get("/profile/proposals")

@@ -8,7 +8,14 @@ from sqlalchemy.orm import Session
 
 from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
-from app.schemas.workflow import JobCreate, JobListResponse, JobStatus, JobSummary, JobUpdate
+from app.schemas.workflow import (
+    JobCreate,
+    JobDetail,
+    JobListResponse,
+    JobStatus,
+    JobSummary,
+    JobUpdate,
+)
 from app.services import job_workflows as service
 from app.services.idempotency import command
 
@@ -111,7 +118,7 @@ def list_jobs(
     )
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", response_model=JobDetail)
 def get_job(
     job_id: uuid.UUID, db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)
 ):

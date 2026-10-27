@@ -245,9 +245,11 @@ def get_job(db, actor, job_id):
     )
     if job is None:
         raise HTTPException(404, "Job not found")
+    from app.services.job_content import details
+
     return {
         **_summary(db, job).model_dump(mode="json"),
-        "description": job.description,
+        **details(job),
         "notes": job.notes,
     }
 
@@ -265,4 +267,13 @@ def career_job_details(db, actor, jobs):
         if ids
         else []
     )
-    return {str(job.id): job.description or "" for job in rows}
+    from app.services.job_content import details
+
+    return {
+        str(job.id): "\n".join(
+            f"{key}: {value}"
+            for key, value in details(job).items()
+            if value and not key.startswith("hr_contact_")
+        )
+        for job in rows
+    }
