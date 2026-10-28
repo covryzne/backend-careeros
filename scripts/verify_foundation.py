@@ -120,7 +120,7 @@ def main():
                         ) == 1
                     assert (
                         conn.scalar(text("SELECT version_num FROM alembic_version"))
-                        == "0014_job_details_drafts"
+                        == "0015_provider_settings"
                     )
                     assert (
                         conn.scalar(
@@ -146,7 +146,7 @@ def main():
                 )
                 print(
                     "PASS:",
-                    "backup restore + upgrade" if restored else "fresh migrations 0001–0014",
+                    "backup restore + upgrade" if restored else "fresh migrations through 0015",
                 )
         finally:
             for name in names:

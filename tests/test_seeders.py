@@ -152,7 +152,8 @@ def test_demo_matches_use_current_profile_version_and_professional_sources(jobs_
     for match in db.scalars(select(JobMatch)):
         assert match.profile_version == old.profile_version and match.algorithm_version == ALGORITHM
         assert 0 <= match.score <= 100
-        assert all("source_id" in source for source in match.evidence)
+        assert any("job_fingerprint" in source for source in match.evidence)
+        assert all("source_id" in source for source in match.evidence if "matched_skill" in source)
     new_version = profile.update_profile(
         db,
         ActorContext(LOCAL_OWNER_ID),

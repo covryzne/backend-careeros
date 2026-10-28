@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.models.foundation import AgentPreference
 from app.services.audit import audit
+from app.services.provider_settings import configured
 
 
 @dataclass(frozen=True)
@@ -57,9 +58,7 @@ def read_settings(db, actor):
         "effective_enabled": policy.enabled,
         "version": item.version if item else 0,
         "runtime_allowed": settings.agent_runtime_allowed,
-        "provider_configured": bool(
-            settings.llm_base_url and settings.llm_api_key and settings.llm_model
-        ),
+        "provider_configured": configured(db, actor.owner_id),
         "worker_mode": "embedded"
         if settings.agent_worker_embedded and settings.app_env == "development"
         else "external",

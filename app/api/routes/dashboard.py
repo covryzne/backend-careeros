@@ -24,4 +24,6 @@ def get_dashboard(
         raise HTTPException(
             status_code=422, detail="Tanggal awal tidak boleh melewati tanggal akhir."
         )
-    return dashboard_summary(db, actor.owner_id, from_date, to_date)
+    result = dashboard_summary(db, actor.owner_id, from_date, to_date)
+    db.commit()
+    return result

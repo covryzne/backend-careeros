@@ -121,6 +121,9 @@ class JobSummary(BaseModel):
     match_score: float | None = None
     match_profile_version: int | None = None
     is_match_stale: bool = False
+    match_summary: str | None = None
+    matching_skills: list[str] = []
+    missing_requirements: list[str] = []
 
 
 class JobDetail(JobSummary):

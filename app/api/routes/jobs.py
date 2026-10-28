@@ -101,7 +101,7 @@ def list_jobs(
     db: Session = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ) -> JobListResponse:
-    return service.list_jobs(
+    result = service.list_jobs(
         q=q,
         status=status,
         source_id=source_id,
@@ -116,10 +116,14 @@ def list_jobs(
         db=db,
         actor=actor,
     )
+    db.commit()
+    return result
 
 
 @router.get("/{job_id}", response_model=JobDetail)
 def get_job(
     job_id: uuid.UUID, db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)
 ):
-    return service.get_job(db, actor, job_id)
+    result = service.get_job(db, actor, job_id)
+    db.commit()
+    return result

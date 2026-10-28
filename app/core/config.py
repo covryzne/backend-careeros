@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    provider_encryption_key: SecretStr | None = None
     agent_max_tool_calls: int = Field(default=12, ge=1, le=12)
     agent_max_turns: int = Field(default=8, ge=1, le=8)
     agent_timeout_seconds: int = Field(default=90, ge=1, le=90)

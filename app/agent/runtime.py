@@ -20,7 +20,7 @@ from app.services.agent_facade import AgentServices
 from app.services.agent_privacy import private_values, sanitize_messages
 from app.services.agent_settings import policy_for
 from app.services.career import report_instruction, validate_report
-from app.services.idempotency import fingerprint
+from app.services.idempotency import fingerprint, lock_owner
 
 
 def utc(value):
@@ -38,7 +38,6 @@ class RunStopped(Exception):
 
 
 async def process_run(run_id, provider=None, session_factory=SessionLocal):
-    provider = provider or LLMProvider()
     pending = []
     career_context = None
     repaired = False
@@ -54,6 +53,18 @@ async def process_run(run_id, provider=None, session_factory=SessionLocal):
             run = db.get(AgentRun, run_id)
             if run is None or run.status != "running":
                 return
+            if provider is None:
+                from app.services.provider_settings import config_for
+
+                try:
+                    config = config_for(db, run.owner_id)
+                except HTTPException:
+                    raise ProviderUnavailable(
+                        "Saved provider configuration is unavailable"
+                    ) from None
+                if config is None:
+                    raise ProviderUnavailable("LLM provider is not configured")
+                provider = LLMProvider(config)
             deadline = utc(run.lease_until)
             max_turns = min(8, settings.agent_max_turns, run.scope.get("_max_turns", 8))
             private = private_values(profile.load_profile(db, ActorContext(run.owner_id)))
@@ -153,6 +164,12 @@ async def process_run(run_id, provider=None, session_factory=SessionLocal):
                 )
                 for call in calls:
                     with session_factory() as db:
+                        # Match-cache refresh and write commands lock owner first;
+                        # keep this order so cancellation cannot deadlock a read tool.
+                        owner_id = db.scalar(select(AgentRun.owner_id).where(AgentRun.id == run_id))
+                        if owner_id is None:
+                            raise RunStopped("CANCELLED")
+                        lock_owner(db, ActorContext(owner_id))
                         run = db.scalar(
                             select(AgentRun).where(AgentRun.id == run_id).with_for_update()
                         )

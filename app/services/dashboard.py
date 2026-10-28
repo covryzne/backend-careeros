@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.candidate import CandidateProfile
-from app.models.workflow import Application, Job, JobMatch, Reminder
+from app.models.workflow import Application, Job, Reminder
 from app.schemas.dashboard import DashboardApplication, DashboardReminder, DashboardResponse
 from app.schemas.workflow import ApplicationStatus
+from app.services import matching
 from app.services.jobs import summarize_jobs
 
 JAKARTA = ZoneInfo("Asia/Jakarta")
@@ -26,6 +26,7 @@ def dashboard_summary(
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> DashboardResponse:
+    matching.refresh(db, owner_id)
     now = datetime.now(UTC)
     today = now.astimezone(JAKARTA).date()
     horizon = today + timedelta(days=7)
@@ -75,19 +76,7 @@ def dashboard_summary(
         .order_by(Application.updated_at.desc(), Application.id.desc())
         .limit(PREVIEW_LIMIT)
     ).all()
-    latest_score = (
-        select(JobMatch.score)
-        .join(CandidateProfile, CandidateProfile.id == JobMatch.profile_id)
-        .where(
-            CandidateProfile.owner_id == owner_id,
-            JobMatch.profile_version == CandidateProfile.profile_version,
-            JobMatch.job_id == Job.id,
-            JobMatch.owner_id == owner_id,
-        )
-        .order_by(JobMatch.calculated_at.desc(), JobMatch.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
+    latest_score = matching.score_for(owner_id)
     already_applied = (
         select(Application.id)
         .where(

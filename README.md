@@ -47,10 +47,12 @@ Rerunning does not create duplicate jobs/skills/profile children. It fills missi
 seed job fields, restores soft-deleted seed jobs with their original IDs, and
 preserves active job statuses, edited non-empty content, unrelated jobs and
 application history. Existing jobs beyond these 15 are retained. If run before a
-profile exists, jobs are still seeded; rerun after seeding the profile to create
-illustrative match scores at the current profile version. The demo score uses
-professional-source keyword overlap and is explicitly versioned as
-`seed-professional-overlap-v2`; it is not the production matching algorithm.
+profile exists, jobs are still seeded. Matching now updates automatically from the
+latest saved professional profile when jobs/Home/pipeline are read. The seeder and
+application share `professional-overlap-v1`: a transparent skill-alignment
+indicator based on professional-source keyword overlap. It is not a hiring
+probability or proof that every qualification is met. See
+[CURRENT_PROFILE_MATCHING.md](../specs-careeros/CURRENT_PROFILE_MATCHING.md).
 
 The profile seeder fills missing profile/preferences and merges the existing real
 seed skills, experiences and projects. It creates no Verified Facts or artificial
@@ -82,6 +84,17 @@ Private PDFs are stored under ignored `.private-documents/` by default; back thi
 The Copilot workspace supports prompted job analysis/comparison, pipeline review, and career next steps through the `career_assistant` task. It uses bounded shared-service context and strict cited reports, with source selection and searchable history. See [the assistant contract and verification](../specs-careeros/CAREER_ASSISTANT.md). No additional database migration is needed. Crawler scheduling remains separate, and no real provider configuration or feature flag is enabled automatically.
 
 ## Agent switches in Settings
+
+Provider base URL, model and API key can now be configured from Pengaturan →
+Provider AI after migration `0015_provider_settings`. The key field stays masked;
+leave it empty to keep a saved key. Keys are encrypted in the owner's database row
+and never returned by the API. Local development creates the master key privately
+at `DOCUMENT_STORAGE_DIR/.provider-key`; back up this file separately with the
+private storage directory. Production uses backend-only `PROVIDER_ENCRYPTION_KEY`
+(a Fernet key). Keep this master key stable across API/worker processes and restarts.
+Existing LLM environment settings remain a fallback. See
+[PROVIDER_SETTINGS.md](../specs-careeros/PROVIDER_SETTINGS.md) for the contract,
+privacy boundary and three Copilot prompt templates.
 
 Apply additive migration `0011_agent_preferences` before starting this version. Owners can then save agent enable/write/approval preferences and execution limits from Pengaturan; no backend restart is needed. Local development starts an idle embedded worker by default. Set `AGENT_WORKER_EMBEDDED=false` for a separate worker, or `AGENT_RUNTIME_ALLOWED=false` to enforce a server-level shutdown. Provider secrets still belong in backend configuration. Matching reads professional profile data directly, while personal fields are omitted/filtered. See [AGENT_SETTINGS.md](../specs-careeros/AGENT_SETTINGS.md).
 

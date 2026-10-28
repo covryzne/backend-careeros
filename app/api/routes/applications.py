@@ -49,9 +49,11 @@ def list_applications(
     db: Session = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
-    return service.list_applications(
+    result = service.list_applications(
         status=status, q=q, page=page, page_size=page_size, db=db, actor=actor
     )
+    db.commit()
+    return result
 
 
 @router.get("/{application_id}", response_model=ApplicationDetail)
@@ -60,7 +62,9 @@ def get_application(
     db: Session = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
-    return service.get_application(application_id=application_id, db=db, actor=actor)
+    result = service.get_application(application_id=application_id, db=db, actor=actor)
+    db.commit()
+    return result
 
 
 @router.patch("/{application_id}", response_model=ApplicationDetail)

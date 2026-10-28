@@ -1,15 +1,13 @@
 """Seed 15 complete demo jobs without requiring a running API server."""
 
 import argparse
-import re
 import sys
 from datetime import UTC, datetime, time
-from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
@@ -17,21 +15,28 @@ from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.db.session import SessionLocal
 from app.models.workflow import Job, JobMatch, JobSkill
 from app.schemas.workflow import JobCreate
-from app.services import job_workflows, profile
+from app.services import job_workflows, matching, profile
 from app.services.audit import audit
 from app.services.idempotency import lock_owner
-from app.services.professional_sources import draft_sources
 from scripts.seed_data import jobs_for
 
 JOBS = jobs_for(datetime.now(UTC).date())
-ALGORITHM = "seed-professional-overlap-v2"
+ALGORITHM = matching.ALGORITHM
 
 
 def seed(db, actor=None):
     actor = actor or ActorContext(LOCAL_OWNER_ID)
     lock_owner(db, actor)
     owner = profile.load_profile(db, actor, lock=True)
-    sources = draft_sources(owner)
+    before_matches = (
+        db.scalar(
+            select(func.count())
+            .select_from(JobMatch)
+            .where(JobMatch.owner_id == actor.owner_id, JobMatch.algorithm_version == ALGORITHM)
+        )
+        or 0
+    )
+    seed_ids = []
     counts = {"created": 0, "restored": 0, "enriched": 0, "matches_created": 0}
     for record in JOBS:
         job = db.scalar(
@@ -79,44 +84,18 @@ def seed(db, actor=None):
             if name.strip().casefold() not in existing:
                 db.add(JobSkill(job_id=job.id, name=name, is_required=True))
         db.flush()
-        if owner is None:
-            continue
-        prior = db.scalar(
-            select(JobMatch.id).where(
-                JobMatch.owner_id == actor.owner_id,
-                JobMatch.job_id == job.id,
-                JobMatch.profile_version == owner.profile_version,
-                JobMatch.algorithm_version == ALGORITHM,
-            )
+        seed_ids.append(job.id)
+    matching.refresh(db, actor.owner_id, seed_ids)
+    after_matches = (
+        db.scalar(
+            select(func.count())
+            .select_from(JobMatch)
+            .where(JobMatch.owner_id == actor.owner_id, JobMatch.algorithm_version == ALGORITHM)
         )
-        if prior:
-            continue
-        matched, missing, evidence = [], [], []
-        for skill in record["skills"]:
-            pattern = re.compile(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", re.IGNORECASE)
-            source = next((item for item in sources if pattern.search(item["text"])), None)
-            (matched if source else missing).append(skill)
-            if source:
-                evidence.append(
-                    {"source_id": source["id"], "kind": source["kind"], "matched_skill": skill}
-                )
-        score = (Decimal(len(matched)) * 100 / len(record["skills"])).quantize(Decimal("0.01"))
-        db.add(
-            JobMatch(
-                owner_id=actor.owner_id,
-                job_id=job.id,
-                profile_id=owner.id,
-                profile_version=owner.profile_version,
-                score=score,
-                matching_skills=matched,
-                missing_requirements=missing,
-                blockers=[],
-                evidence=evidence,
-                algorithm_version=ALGORITHM,
-                calculated_at=datetime.now(UTC),
-            )
-        )
-        counts["matches_created"] += 1
+        or 0
+    )
+    counts["matches_created"] = after_matches - before_matches
+
     db.flush()
     return {
         **counts,
@@ -139,7 +118,7 @@ def main():
     print("Jobs demo siap:", result)
     if result["profile_version"] is None:
         print(
-            "Profil belum tersedia. Jalankan python seed_real_profile.py lalu ulangi seed_jobs.py untuk skor demo."
+            "Profil belum tersedia. Isi profil; matching dihitung otomatis saat lowongan ditampilkan."
         )
 
 

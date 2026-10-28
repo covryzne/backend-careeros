@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from app.models.candidate import CandidateProfile
 from app.models.workflow import Job, JobMatch, JobSkill, JobSource
 from app.schemas.workflow import JobSummary
+from app.services import matching
 
 
 def summarize_jobs(db, jobs):
@@ -10,6 +11,8 @@ def summarize_jobs(db, jobs):
         return []
     ids = [job.id for job in jobs]
     owners = {job.owner_id for job in jobs}
+    for owner_id in sorted(owners, key=str):
+        matching.refresh(db, owner_id, [job.id for job in jobs if job.owner_id == owner_id])
     source_ids = [job.source_id for job in jobs if job.source_id]
     source_rows = (
         db.execute(
@@ -34,12 +37,18 @@ def summarize_jobs(db, jobs):
             JobMatch.job_id,
             JobMatch.owner_id,
             JobMatch.score,
+            JobMatch.matching_skills,
+            JobMatch.missing_requirements,
             JobMatch.profile_version,
             CandidateProfile.profile_version.label("current_version"),
             func.row_number()
             .over(
                 partition_by=(JobMatch.owner_id, JobMatch.job_id),
-                order_by=(JobMatch.calculated_at.desc(), JobMatch.id.desc()),
+                order_by=(
+                    (JobMatch.algorithm_version == matching.ALGORITHM).desc(),
+                    JobMatch.calculated_at.desc(),
+                    JobMatch.id.desc(),
+                ),
             )
             .label("position"),
         )
@@ -48,6 +57,8 @@ def summarize_jobs(db, jobs):
             JobMatch.job_id.in_(ids),
             JobMatch.owner_id.in_(owners),
             CandidateProfile.owner_id == JobMatch.owner_id,
+            JobMatch.profile_version == CandidateProfile.profile_version,
+            matching.eligible_match(),
         )
         .subquery()
     )
@@ -57,6 +68,8 @@ def summarize_jobs(db, jobs):
     result = []
     for job in jobs:
         match = matches.get((job.owner_id, job.id))
+        matched_count = len(match.matching_skills or []) if match else 0
+        required_count = matched_count + len(match.missing_requirements or []) if match else 0
         result.append(
             JobSummary.model_validate(
                 {
@@ -67,9 +80,16 @@ def summarize_jobs(db, jobs):
                     "skills": skills.get(job.id, []),
                     "match_score": float(match.score) if match else None,
                     "match_profile_version": match.profile_version if match else None,
-                    "is_match_stale": match.profile_version != match.current_version
+                    "is_match_stale": False,
+                    "matching_skills": match.matching_skills or [] if match else [],
+                    "missing_requirements": match.missing_requirements or [] if match else [],
+                    "match_summary": (
+                        f"{matched_count} dari {required_count} skill lowongan ditemukan pada profil"
+                        if skills.get(job.id)
+                        else "Berdasarkan hasil matching tersimpan"
+                    )
                     if match
-                    else False,
+                    else None,
                 }
             )
         )

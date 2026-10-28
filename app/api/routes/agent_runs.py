@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.registry import available_tools
-from app.core.config import settings
 from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.models.foundation import AgentApproval
@@ -17,6 +16,7 @@ from app.schemas.agent import AgentRunPage, AgentRunResponse, RunCreate, StrictI
 from app.services import agent_runs, approvals
 from app.services.agent_settings import policy_for
 from app.services.idempotency import command
+from app.services.provider_settings import configured
 
 router = APIRouter()
 
@@ -32,9 +32,7 @@ def capabilities(db: Session = Depends(get_db), actor: ActorContext = Depends(ge
         "enabled": policy.enabled,
         "internal_writes_enabled": policy.enabled and policy.internal_writes_enabled,
         "approvals_enabled": policy.enabled and policy.approvals_enabled,
-        "provider_configured": bool(
-            settings.llm_base_url and settings.llm_api_key and settings.llm_model
-        ),
+        "provider_configured": configured(db, actor.owner_id),
         "max_tool_calls": policy.max_tool_calls,
         "timeout_seconds": policy.timeout_seconds,
         "tools": list(available_tools(policy)),

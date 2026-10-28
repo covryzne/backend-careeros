@@ -1,7 +1,7 @@
 from app.services.agent_privacy import private_values, sanitize_text
 
 
-def draft_sources(owner):
+def draft_sources(owner, *, max_chars=2000):
     if owner is None:
         return []
     private = private_values(owner)
@@ -15,7 +15,7 @@ def draft_sources(owner):
                     "id": str(identity),
                     "kind": kind,
                     "label": sanitize_text(label, private),
-                    "text": text[:2000],
+                    "text": text[:max_chars],
                 }
             )
 

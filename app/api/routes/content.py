@@ -207,14 +207,18 @@ def list_drafts(db: Session = Depends(get_db), actor: ActorContext = Depends(get
         .order_by(Draft.created_at.desc())
         .limit(20)
     ).all()
-    return {"items": [drafts.draft_detail(db, actor, item) for item in items]}
+    result = {"items": [drafts.draft_detail(db, actor, item) for item in items]}
+    db.commit()
+    return result
 
 
 @router.get("/drafts/{draft_id}")
 def get_draft(
     draft_id: uuid.UUID, db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)
 ):
-    return drafts.draft_detail(db, actor, drafts.owned_draft(db, actor, draft_id))
+    result = drafts.draft_detail(db, actor, drafts.owned_draft(db, actor, draft_id))
+    db.commit()
+    return result
 
 
 @router.patch("/drafts/{draft_id}")

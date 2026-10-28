@@ -11,10 +11,16 @@ class ProviderUnavailable(Exception):
 
 
 class LLMProvider:
+    def __init__(self, config=None):
+        self.config = config
+
     async def complete(self, messages, tools, remaining_seconds):
-        if not all((settings.llm_base_url, settings.llm_api_key, settings.llm_model)):
+        base_url = self.config.base_url if self.config else settings.llm_base_url
+        api_key = self.config.api_key.get_secret_value() if self.config else settings.llm_api_key
+        model = self.config.model if self.config else settings.llm_model
+        if not all((base_url, api_key, model)):
             raise ProviderUnavailable("LLM provider is not configured")
-        if not settings.llm_base_url.startswith("https://") and settings.app_env not in {
+        if not base_url.startswith("https://") and settings.app_env not in {
             "development",
             "test",
         }:
@@ -25,10 +31,10 @@ class LLMProvider:
                 try:
                     async with client.stream(
                         "POST",
-                        settings.llm_base_url.rstrip("/") + "/chat/completions",
-                        headers={"Authorization": "Bearer " + settings.llm_api_key},
+                        base_url.rstrip("/") + "/chat/completions",
+                        headers={"Authorization": "Bearer " + api_key},
                         json={
-                            "model": settings.llm_model,
+                            "model": model,
                             "messages": messages,
                             "tools": tools,
                             "tool_choice": "auto",

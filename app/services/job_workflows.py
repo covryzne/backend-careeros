@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import ActorContext
-from app.models.workflow import Job, JobMatch, JobSkill, JobSource
+from app.models.workflow import Job, JobSkill, JobSource
 from app.schemas.workflow import JobCreate, JobListResponse, JobSummary, JobUpdate
 from app.services.jobs import summarize_job as _summary
 
@@ -159,23 +159,12 @@ def list_jobs(
     page_size=20,
     job_ids=None,
 ):
-    from app.models.candidate import CandidateProfile
+    from app.services import matching
     from app.services.jobs import summarize_jobs
 
     actor.require("jobs:read")
-    score = (
-        select(JobMatch.score)
-        .join(CandidateProfile, CandidateProfile.id == JobMatch.profile_id)
-        .where(
-            JobMatch.job_id == Job.id,
-            JobMatch.owner_id == actor.owner_id,
-            CandidateProfile.owner_id == actor.owner_id,
-            JobMatch.profile_version == CandidateProfile.profile_version,
-        )
-        .order_by(JobMatch.calculated_at.desc(), JobMatch.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
+    matching.refresh(db, actor.owner_id)
+    score = matching.score_for(actor.owner_id)
     query = select(Job).where(Job.owner_id == actor.owner_id, Job.deleted_at.is_(None))
     if job_ids:
         query = query.where(Job.id.in_(job_ids))

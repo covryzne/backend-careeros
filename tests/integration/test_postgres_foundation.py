@@ -154,3 +154,50 @@ def test_concurrent_cv_versions_are_monotonic_per_role(pg, tmp_path, monkeypatch
             select(CandidateDocument).where(CandidateDocument.owner_id == actor.owner_id)
         ).all()
         assert len(docs) == 2 and {item.role_key for item in docs} == {"ai engineer"}
+
+
+def test_concurrent_matching_refresh_uses_one_current_cache_row(pg):
+    from app.models.workflow import JobMatch
+    from app.services.matching import ALGORITHM, refresh
+
+    actor = ActorContext(uuid.uuid4())
+    with pg() as db:
+        owner = profile.update_profile(
+            db,
+            actor,
+            ProfileUpdate(full_name="Matching Candidate", professional_summary="Build Python APIs"),
+        )
+        target = job_workflows.create_job(
+            db,
+            actor,
+            payload=JobCreate(title="Engineer", company="Example", skills=["Python", "Docker"]),
+        )
+        profile.update_profile(
+            db,
+            actor,
+            ProfileUpdate(professional_summary="Build Python APIs using Docker"),
+            expected=owner.profile_version,
+        )
+        current = profile.load_profile(db, actor).profile_version
+        identity = target.id
+        db.commit()
+    barrier = Barrier(2)
+
+    def read(_):
+        with pg() as db:
+            barrier.wait()
+            result = refresh(db, actor.owner_id)
+            db.commit()
+            return result
+
+    with ThreadPoolExecutor(2) as pool:
+        assert sorted(pool.map(read, [1, 2])) == [0, 1]
+    with pg() as db:
+        values = db.scalars(
+            select(JobMatch).where(
+                JobMatch.job_id == identity,
+                JobMatch.profile_version == current,
+                JobMatch.algorithm_version == ALGORITHM,
+            )
+        ).all()
+        assert len(values) == 1 and values[0].score == 100

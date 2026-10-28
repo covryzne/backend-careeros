@@ -123,6 +123,20 @@ class AgentApproval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ProviderSetting(Base):
+    __tablename__ = "provider_settings"
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    base_url: Mapped[str] = mapped_column(String(2000), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AgentPreference(Base):
     __tablename__ = "agent_preferences"
     __table_args__ = (
