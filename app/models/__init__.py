@@ -1,3 +1,4 @@
+from app.models import crawler  # noqa: F401 - register crawler metadata
 from app.models.candidate import (
     CandidateExperience,
     CandidateFact,

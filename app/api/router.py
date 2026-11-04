@@ -24,3 +24,7 @@ api_router.include_router(agent_settings_router, tags=["agent-settings"])
 from app.api.routes.cv_imports import router as cv_imports_router
 
 api_router.include_router(cv_imports_router, tags=["cv-imports"])
+
+from app.api.routes.crawler import router as crawler_router
+
+api_router.include_router(crawler_router, prefix="/crawler", tags=["crawler"])

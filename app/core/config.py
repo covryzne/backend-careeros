@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     document_storage_dir: Path = BACKEND_ROOT / ".private-documents"
     document_max_bytes: int = 10 * 1024 * 1024
     database_url: str
+    crawler_root: Path = BACKEND_ROOT.parent / "careeros-crawler"
+    crawler_python: Path | None = None
+    crawler_browser_mode: str = Field(default="auto", pattern="^(auto|headed|headless)$")
+    crawler_run_timeout_seconds: int = Field(default=3600, ge=60, le=14400)
+    crawler_lease_seconds: int = Field(default=30, ge=15, le=120)
     api_v1_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
 

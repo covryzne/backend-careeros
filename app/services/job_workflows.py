@@ -33,6 +33,7 @@ def create_job(db: Session, actor: ActorContext, *, payload: JobCreate) -> JobSu
     ):
         raise HTTPException(422, "Invalid salary range")
     canonical = None
+    normalized_hash = None
     if payload.original_url:
         try:
             parsed = urlsplit(payload.original_url.strip())
@@ -64,6 +65,27 @@ def create_job(db: Session, actor: ActorContext, *, payload: JobCreate) -> JobSu
                     "existing_job_id": str(existing.id),
                 },
             )
+        from app.services.crawler_ingestion import find_existing
+        from app.services.job_identity import normalize_url, url_hash
+
+        try:
+            normalized = normalize_url(payload.original_url)
+        except ValueError:
+            raise HTTPException(422, "Invalid job URL") from None
+        try:
+            existing = find_existing(db, actor.owner_id, normalized)
+        except ValueError:
+            raise HTTPException(409, "Duplicate URL identities require review") from None
+        if existing:
+            raise HTTPException(
+                409,
+                {
+                    "code": "DUPLICATE_JOB",
+                    "message": "Lowongan dengan URL ini sudah tersedia.",
+                    "existing_job_id": str(existing.id),
+                },
+            )
+        normalized_hash = url_hash(normalized)
     source = None
     if payload.source_name:
         source = db.scalar(
@@ -88,6 +110,7 @@ def create_job(db: Session, actor: ActorContext, *, payload: JobCreate) -> JobSu
             values[field] = Decimal(str(values[field])).quantize(Decimal("0.01"))
     job = Job(
         canonical_url=canonical,
+        normalized_url_hash=normalized_hash,
         owner_id=actor.owner_id,
         source_id=source.id if source else None,
         discovered_at=datetime.now(UTC),

@@ -39,6 +39,7 @@ class Job(Base):
         UniqueConstraint(
             "owner_id", "source_id", "external_job_id", name="uq_job_external_identity"
         ),
+        UniqueConstraint("owner_id", "normalized_url_hash", name="uq_job_normalized_url"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -52,6 +53,7 @@ class Job(Base):
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     company: Mapped[str] = mapped_column(String(240), nullable=False)
     canonical_url: Mapped[str | None] = mapped_column(Text)
+    normalized_url_hash: Mapped[str | None] = mapped_column(String(64))
     original_url: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     responsibilities: Mapped[str | None] = mapped_column(Text)
