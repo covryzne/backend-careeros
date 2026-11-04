@@ -141,7 +141,7 @@ def test_restore_seeded_jobs_preserves_id_application_and_active_status_changes(
     assert stored.job_id == deleted.id and stored.status == "applied"
 
 
-def test_demo_matches_use_current_profile_version_and_professional_sources(jobs_client):
+def test_demo_matches_use_current_profile_version_and_professional_sources(jobs_client, enabled_job_matching):
     _, db = jobs_client
     seed_profile(db)
     first = seed_jobs(db)

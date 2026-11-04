@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     allow_local_identity: bool = True
     require_profile_version: bool = False
+    job_matching_enabled: bool = False
     agent_runtime_allowed: bool = True
     agent_worker_embedded: bool = True
     agent_enabled: bool = False

@@ -2,23 +2,26 @@
 
 import hashlib
 import json
-import re
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import Numeric, exists, false, literal, or_, select
 
+from app.core.config import settings
 from app.core.security import ActorContext
 from app.models.candidate import CandidateProfile
 from app.models.workflow import Job, JobMatch, JobSkill
 from app.services.idempotency import lock_owner
 from app.services.professional_sources import draft_sources
 from app.services.profile import load_profile
+from app.services.skill_extraction import VERSION, canonical, effective_skills, pattern_for
 
-ALGORITHM = "professional-overlap-v1"
+ALGORITHM = "professional-overlap-v2"
 
 
 def refresh(db, owner_id, job_ids=None):
+    if not settings.job_matching_enabled:
+        return 0
     if db.scalar(select(CandidateProfile.id).where(CandidateProfile.owner_id == owner_id)) is None:
         return 0
     actor = ActorContext(owner_id)
@@ -60,12 +63,16 @@ def refresh(db, owner_id, job_ids=None):
     }
     changed = 0
     for job in jobs:
-        required = list({name.casefold(): name for name in skills.get(job.id, [])}.values())
+        extracted = effective_skills(job, skills.get(job.id, []))
+        required = [item["skill"] for item in extracted]
         if not required:
+            if job.id in cached:
+                db.delete(cached[job.id])  # Invalidate only the current derived cache.
             continue
         fingerprint = hashlib.sha256(
             json.dumps(
                 {
+                    "extractor": VERSION,
                     "title": job.title,
                     "description": job.description,
                     "requirements": job.requirements,
@@ -84,10 +91,12 @@ def refresh(db, owner_id, job_ids=None):
             if isinstance(item, dict)
         ):
             continue
-        matched, missing, evidence = [], [], [{"job_fingerprint": fingerprint}]
+        matched, missing, evidence = [], [], [{"job_fingerprint": fingerprint}, *extracted]
         for skill in required:
-            pattern = re.compile(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", re.IGNORECASE)
-            source = next((item for item in sources if pattern.search(item["text"])), None)
+            pattern = pattern_for(skill)
+            source = next((item for item in sources if (
+                item["kind"] == "skill" and canonical(item["text"]).casefold() == skill.casefold()
+            ) or pattern.search(item["text"])), None)
             (matched if source else missing).append(skill)
             if source:
                 evidence.append(
@@ -114,18 +123,22 @@ def refresh(db, owner_id, job_ids=None):
 
 
 def eligible_match():
-    # Legacy matches remain usable only for the current profile. Automatic cache
-    # entries cannot survive removal of their structured job skills.
+    if not settings.job_matching_enabled:
+        return false()
+    # Current rows are refreshed/invalidated before reads. Preserve nonautomatic legacy
+    # scores only for jobs without structured skills; v1 must not mask unknown v2 data.
     has_skills = exists(
         select(JobSkill.id).where(JobSkill.job_id == JobMatch.job_id, JobSkill.name != "")
     )
     return or_(
-        (JobMatch.algorithm_version == ALGORITHM) & has_skills,
-        (JobMatch.algorithm_version != ALGORITHM) & ~has_skills,
+        JobMatch.algorithm_version == ALGORITHM,
+        JobMatch.algorithm_version.notin_([ALGORITHM, "professional-overlap-v1"]) & ~has_skills,
     )
 
 
 def score_for(owner_id):
+    if not settings.job_matching_enabled:
+        return literal(None, type_=Numeric(5, 2))
     return (
         select(JobMatch.score)
         .join(CandidateProfile, CandidateProfile.id == JobMatch.profile_id)

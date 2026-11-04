@@ -115,7 +115,7 @@ def test_parser_extracts_actual_text_and_bilingual_fields():
     assert parse_text(indo)["fields"]["experiences"][0]["is_current"]
 
 
-def test_cv_import_creates_profile_atomically_and_matches_without_facts(jobs_client, storage):
+def test_cv_import_creates_profile_atomically_and_matches_without_facts(jobs_client, storage, enabled_job_matching):
     client, db = jobs_client
     record = stage(client)
     assert client.get("/api/v1/profile").status_code == 404

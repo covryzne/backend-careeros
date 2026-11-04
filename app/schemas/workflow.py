@@ -97,6 +97,12 @@ class JobUpdate(JobContentInput):
     status: JobStatus | None = None
 
 
+class SkillEvidence(BaseModel):
+    skill: str
+    field: str
+    excerpt: str
+
+
 class JobSummary(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -117,7 +123,11 @@ class JobSummary(BaseModel):
     status: JobStatus
     source_id: uuid.UUID | None
     source_name: str | None = None
+    crawler_keywords: list[str] = Field(default_factory=list)
+    description_preview: str | None = None
+    skill_evidence: list[SkillEvidence] = Field(default_factory=list)
     skills: list[str] = []
+    matching_status: str = "coming_soon"
     match_score: float | None = None
     match_profile_version: int | None = None
     is_match_stale: bool = False
