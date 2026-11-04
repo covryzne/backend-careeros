@@ -1,4 +1,7 @@
-from app.models import crawler  # noqa: F401 - register crawler metadata
+from app.models import (
+    crawler,  # noqa: F401 - register crawler metadata
+    crawler_stats,  # noqa: F401 - register analytics metadata
+)
 from app.models.candidate import (
     CandidateExperience,
     CandidateFact,

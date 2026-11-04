@@ -75,6 +75,14 @@ The PostgreSQL verification script needs a protected backup and database creatio
 
 ## Features
 
+Crawler activity summaries have a separate backfill/refresh process after migration
+`0018_crawler_daily_stats`. It publishes daily owner/platform counters every five
+minutes when run, without changing crawl execution. See the
+[analytics runbook](../specs/ANALYTICS_TRENDS_IMPLEMENTATION.md) for coverage selection,
+commands and verification. Migration `0019_crawler_distinct_run_stats` adds distinct
+run counts for `GET /api/v1/crawler/stats` and the Statistik Hasil Crawl submenu
+under Job Scraper. Refresh publications after upgrading to definition version 2.
+
 Owner-scoped Jobs/Applications/Dashboard, partial profile/child editing and versioning, idempotent commands, reminders, private PDF documents, owner-reviewed fact grounding, versioned cited drafts, durable agent runs and immutable approvals. HTTP and typed agent tools call the same services. Existing tracker behavior remains compatible.
 
 The agent and both write flags default to false. Configuration alone does not start a worker. After the runbook's read-only activation checks, run `python -m app.agent.worker` separately. No external sending/submission/destructive tools are registered. Keep server credentials out of frontend configuration.

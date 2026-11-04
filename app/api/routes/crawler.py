@@ -1,5 +1,6 @@
 # ruff: noqa: B008
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy import func, select
@@ -17,9 +18,24 @@ from app.schemas.crawler import (
     RunRead,
     SourceRead,
 )
+from app.schemas.crawler_stats import CrawlerStatsResponse
 from app.services import crawler_runs as service
+from app.services.crawler_stats_read import read_stats
 
 router = APIRouter()
+
+
+@router.get("/stats", response_model=CrawlerStatsResponse)
+def statistics(
+    from_date: date = Query(alias="from"),
+    to_date: date = Query(alias="to"),
+    platform: str | None = Query(
+        default=None, min_length=1, max_length=40, pattern=r"^[a-z0-9_-]+$"
+    ),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    return read_stats(db, actor, from_date, to_date, platform)
 
 
 @router.get("/capabilities", response_model=CapabilitiesRead)
