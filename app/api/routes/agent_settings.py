@@ -6,9 +6,9 @@ from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.schemas.agent_settings import AgentSettingsPatch, AgentSettingsResponse
 from app.schemas.provider_settings import ProviderSettingsPatch, ProviderSettingsResponse
-from app.services import provider_settings
-from app.services.agent_settings import read_settings, update_settings
-from app.services.idempotency import command
+from app.services.agent.settings import read_settings, update_settings
+from app.services.providers import settings as provider_settings
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 

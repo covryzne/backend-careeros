@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.models.workflow import AgentRun, Application
 from app.schemas.agent import MoveArguments
-from app.services.approvals import prepare_action
+from app.services.agent.approvals import prepare_action
 
 
 def setup_profile(client):

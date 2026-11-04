@@ -31,8 +31,8 @@ from app.schemas.profile import (
     FactConfirmation,
     ProfileUpdate,
 )
-from app.services import profile as service
-from app.services.idempotency import command
+from app.services.profile import service
+from app.services.shared.idempotency import command
 
 LOCAL_OWNER_ID = security.LOCAL_OWNER_ID
 

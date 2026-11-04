@@ -20,7 +20,7 @@ from app.schemas.crawler_stats import (
     CrawlerStatsDay,
     CrawlerStatsResponse,
 )
-from app.services.crawler_stats import DEFINITION_VERSION, JAKARTA
+from app.services.crawler.stats import DEFINITION_VERSION, JAKARTA
 
 
 def not_ready():

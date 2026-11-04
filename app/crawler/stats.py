@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.session import engine
-from app.services.crawler_stats import refresh
+from app.services.crawler.stats import refresh
 
 log = logging.getLogger(__name__)
 

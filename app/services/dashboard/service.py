@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.models.workflow import Application, Job, Reminder
 from app.schemas.dashboard import DashboardApplication, DashboardReminder, DashboardResponse
 from app.schemas.workflow import ApplicationStatus
-from app.services import matching
-from app.services.jobs import summarize_jobs
+from app.services.jobs import matching
+from app.services.jobs.summaries import summarize_jobs
 
 JAKARTA = ZoneInfo("Asia/Jakarta")
 ACTIVE_STAGES = ("applied", "assessment", "interview", "offer")

@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.security import ActorContext
 from app.models.workflow import Job, JobSkill, JobSource
 from app.schemas.workflow import JobCreate, JobListResponse, JobSummary, JobUpdate
-from app.services.jobs import summarize_job as _summary
+from app.services.jobs.summaries import summarize_job as _summary
 
 
 def create_job(db: Session, actor: ActorContext, *, payload: JobCreate) -> JobSummary:
     actor.require("jobs:write")
     from urllib.parse import urlsplit, urlunsplit
 
-    from app.services.audit import audit
+    from app.services.shared.audit import audit
 
     if not payload.title.strip() or not payload.company.strip():
         raise HTTPException(422, "Title and company cannot be blank")
@@ -65,8 +65,8 @@ def create_job(db: Session, actor: ActorContext, *, payload: JobCreate) -> JobSu
                     "existing_job_id": str(existing.id),
                 },
             )
-        from app.services.crawler_ingestion import find_existing
-        from app.services.job_identity import normalize_url, url_hash
+        from app.services.crawler.ingestion import find_existing
+        from app.services.jobs.identity import normalize_url, url_hash
 
         try:
             normalized = normalize_url(payload.original_url)
@@ -142,7 +142,7 @@ def update_job(
             if not value:
                 raise HTTPException(422, "Title and company cannot be blank")
         setattr(job, field, value)
-    from app.services.audit import audit
+    from app.services.shared.audit import audit
 
     audit(db, actor, "job_updated", "job", job.id)
     db.flush()
@@ -158,7 +158,7 @@ def delete_job(db: Session, actor: ActorContext, *, job_id: uuid.UUID) -> None:
     )
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    from app.services.audit import audit
+    from app.services.shared.audit import audit
 
     audit(db, actor, "job_deleted", "job", job.id)
     job.deleted_at = datetime.now(UTC)
@@ -182,8 +182,8 @@ def list_jobs(
     page_size=20,
     job_ids=None,
 ):
-    from app.services import matching
-    from app.services.jobs import summarize_jobs
+    from app.services.jobs import matching
+    from app.services.jobs.summaries import summarize_jobs
 
     actor.require("jobs:read")
     matching.refresh(db, actor.owner_id)
@@ -212,7 +212,7 @@ def list_jobs(
     if discovered_from or discovered_to:
         from datetime import timedelta
 
-        from app.services.dashboard import utc_midnight
+        from app.services.dashboard.service import utc_midnight
 
         if discovered_from:
             query = query.where(Job.discovered_at >= utc_midnight(discovered_from))
@@ -257,7 +257,7 @@ def get_job(db, actor, job_id):
     )
     if job is None:
         raise HTTPException(404, "Job not found")
-    from app.services.job_content import details
+    from app.services.jobs.content import details
 
     return {
         **_summary(db, job).model_dump(mode="json"),
@@ -279,7 +279,7 @@ def career_job_details(db, actor, jobs):
         if ids
         else []
     )
-    from app.services.job_content import details
+    from app.services.jobs.content import details
 
     return {
         str(job.id): "\n".join(

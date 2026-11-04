@@ -13,9 +13,10 @@ from sqlalchemy import func, select
 from app.core.config import BACKEND_ROOT, settings
 from app.models.foundation import CandidateDocument, CVImport
 from app.schemas.cv_import import CVFields
-from app.services import documents, profile
-from app.services.audit import audit
-from app.services.idempotency import fingerprint
+from app.services.documents import service as documents
+from app.services.profile import service as profile
+from app.services.shared.audit import audit
+from app.services.shared.idempotency import fingerprint
 
 ERRORS = {
     "PDF_ENCRYPTED": "PDF dilindungi password. Gunakan salinan PDF tanpa password.",
@@ -29,7 +30,7 @@ ERRORS = {
 def parse_pdf(content):
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "app.services.cv_parser"],
+            [sys.executable, "-m", 'app.services.documents.parser'],
             check=False,
             input=content,
             capture_output=True,
@@ -113,7 +114,7 @@ def review(db, actor, import_id, payload):
         raise HTTPException(
             409, "Data CV sudah berubah. Buka kembali hasil parsing sebelum menyimpan."
         )
-    from app.services.cv_matching import snapshot
+    from app.services.documents.matching import snapshot
 
     doc.matching_snapshot = snapshot(payload)
     doc.snapshot_revision += 1
@@ -222,7 +223,7 @@ def apply(db, actor, import_id, payload):
     item.applied_hash = digest
     item.document_id = doc.id
     if doc.matching_snapshot is None:
-        from app.services.cv_matching import snapshot
+        from app.services.documents.matching import snapshot
 
         doc.matching_snapshot = snapshot(payload, require_professional=False)
         if doc.matching_snapshot is not None:

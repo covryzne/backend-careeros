@@ -25,8 +25,8 @@ from app.schemas.profile import (
     CandidateSkillUpdate,
     ProfileUpdate,
 )
-from app.services import profile
-from app.services.idempotency import lock_owner
+from app.services.profile import service as profile
+from app.services.shared.idempotency import lock_owner
 
 PROFILE = {
     "full_name": "Shendi Teuku Maulana Efendi",

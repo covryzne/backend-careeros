@@ -6,8 +6,9 @@ from sqlalchemy import func, select
 from app.agent.registry import available_tools
 from app.models.candidate import User
 from app.models.workflow import AgentRun, AgentToolEvent
-from app.services import application_workflows, job_workflows
-from app.services.agent_settings import policy_for
+from app.services.agent.settings import policy_for
+from app.services.applications import workflows as application_workflows
+from app.services.jobs import workflows as job_workflows
 
 
 def create_run(db, actor, payload):
@@ -43,7 +44,7 @@ def create_run(db, actor, payload):
     selected_document = None
     if payload.task_type == "career_assistant":
         if payload.scope.document_id:
-            from app.services.cv_matching import ready_document
+            from app.services.documents.matching import ready_document
 
             selected_document = ready_document(db, actor, payload.scope.document_id)
         if any(name != "get_career_context" for name in payload.allowed_tools):

@@ -19,8 +19,8 @@ from app.schemas.crawler import (
     SourceRead,
 )
 from app.schemas.crawler_stats import CrawlerStatsResponse
-from app.services import crawler_runs as service
-from app.services.crawler_stats_read import read_stats
+from app.services.crawler import runs as service
+from app.services.crawler.stats_read import read_stats
 
 router = APIRouter()
 

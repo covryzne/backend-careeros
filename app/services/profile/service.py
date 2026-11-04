@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.security import ActorContext
 from app.models.candidate import CandidatePreference, CandidateProfile, User
-from app.services.audit import audit
+from app.services.shared.audit import audit
 
 
 def load_profile(db: Session, actor: ActorContext, *, lock=False):

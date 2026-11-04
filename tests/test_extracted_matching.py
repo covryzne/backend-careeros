@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.workflow import Job, JobMatch, JobSkill
-from app.services.matching import ALGORITHM
+from app.services.jobs.matching import ALGORITHM
 
 pytestmark = pytest.mark.usefixtures("enabled_job_matching")
 

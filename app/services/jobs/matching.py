@@ -11,10 +11,10 @@ from app.core.config import settings
 from app.core.security import ActorContext
 from app.models.candidate import CandidateProfile
 from app.models.workflow import Job, JobMatch, JobSkill
-from app.services.idempotency import lock_owner
-from app.services.professional_sources import draft_sources
-from app.services.profile import load_profile
-from app.services.skill_extraction import VERSION, canonical, effective_skills, pattern_for
+from app.services.jobs.skills import VERSION, canonical, effective_skills, pattern_for
+from app.services.profile.service import load_profile
+from app.services.profile.sources import draft_sources
+from app.services.shared.idempotency import lock_owner
 
 ALGORITHM = "professional-overlap-v2"
 

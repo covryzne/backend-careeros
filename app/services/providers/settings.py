@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.models.foundation import ProviderSetting
 from app.schemas.provider_settings import ProviderSettingsPatch
-from app.services.audit import audit
+from app.services.shared.audit import audit
 
 
 @dataclass(frozen=True)

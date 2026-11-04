@@ -4,10 +4,15 @@ from fastapi import HTTPException
 
 from app.agent.registry import available_tools
 from app.schemas.workflow import JobCreate, ReminderCreate
-from app.services import application_workflows, approvals, drafts, job_workflows, profile, reminders
-from app.services.agent_privacy import private_values, sanitize_text
-from app.services.agent_settings import policy_for
-from app.services.idempotency import command, fingerprint
+from app.services.agent import approvals
+from app.services.agent.privacy import private_values, sanitize_text
+from app.services.agent.settings import policy_for
+from app.services.applications import workflows as application_workflows
+from app.services.drafts import service as drafts
+from app.services.jobs import workflows as job_workflows
+from app.services.profile import service as profile
+from app.services.reminders import service as reminders
+from app.services.shared.idempotency import command, fingerprint
 
 
 class AgentServices:
@@ -29,7 +34,7 @@ class AgentServices:
             application_id=getattr(args, "application_id", None),
         )
         if name == "get_career_context":
-            from app.services.career import career_context
+            from app.services.agent.career import career_context
 
             return career_context(db, actor, context.scope)
         if tool.effect == "approval":

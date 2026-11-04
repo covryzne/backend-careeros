@@ -10,8 +10,8 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.models.candidate import CandidateFact
 from app.models.foundation import CandidateDocument, FactEvidence
-from app.services.idempotency import lock_owner
-from app.services.profile import check_version, load_profile, touch
+from app.services.profile.service import check_version, load_profile, touch
+from app.services.shared.idempotency import lock_owner
 
 
 def metadata(item):
@@ -125,7 +125,7 @@ def upload_document(
         if profile:
             touch(db, actor, profile, "document_uploaded", item.id)
         else:
-            from app.services.audit import audit
+            from app.services.shared.audit import audit
 
             audit(db, actor, "document_uploaded", "document", item.id)
     except Exception:
@@ -152,7 +152,7 @@ def delete_document(db, actor, document_id, expected=None):
     if profile:
         touch(db, actor, profile, "document_deleted", item.id)
     else:
-        from app.services.audit import audit
+        from app.services.shared.audit import audit
 
         audit(db, actor, "document_deleted", "document", item.id)
     db.flush()

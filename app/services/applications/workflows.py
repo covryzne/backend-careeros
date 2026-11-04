@@ -15,14 +15,18 @@ from app.schemas.workflow import (
     ApplicationStatus,
     ApplicationUpdate,
 )
-from app.services.applications import record_activity, validate_transition, validate_undo
-from app.services.jobs import summarize_job as _summary
+from app.services.applications.transitions import (
+    record_activity,
+    validate_transition,
+    validate_undo,
+)
+from app.services.jobs.summaries import summarize_job as _summary
 
 
 def related_metadata(db, actor, applications):
     from app.models.foundation import CandidateDocument
     from app.models.workflow import Reminder
-    from app.services.documents import metadata
+    from app.services.documents.service import metadata
 
     document_ids = [item.selected_document_id for item in applications if item.selected_document_id]
     docs = (
@@ -103,7 +107,7 @@ def create_application(db: Session, actor: ActorContext, *, payload: Application
             status_code=409, detail="Lowongan ini sudah memiliki lamaran di pipeline."
         )
     if payload.selected_document_id is not None:
-        from app.services.documents import owned_document
+        from app.services.documents.service import owned_document
 
         owned_document(db, actor, payload.selected_document_id)
     application = Application(owner_id=actor.owner_id, **payload.model_dump())
@@ -156,7 +160,7 @@ def list_applications(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
-    from app.services.jobs import summarize_jobs
+    from app.services.jobs.summaries import summarize_jobs
 
     summaries = {job.id: job for job in summarize_jobs(db, [job for _, job in rows])}
     ids = [application.id for application, _ in rows]
@@ -248,7 +252,7 @@ def update_application(
             validate_undo(db, application, payload.status.value)
     values = payload.model_dump(exclude_unset=True, exclude={"expected_version", "change_kind"})
     if values.get("selected_document_id"):
-        from app.services.documents import owned_document
+        from app.services.documents.service import owned_document
 
         owned_document(db, actor, values["selected_document_id"])
     validate_transition(application, str(values.get("status", application.status)), values)
@@ -261,7 +265,7 @@ def update_application(
     if application.status != before:
         record_activity(db, application, before, payload.change_kind, actor=actor)
     else:
-        from app.services.audit import audit
+        from app.services.shared.audit import audit
 
         audit(
             db,

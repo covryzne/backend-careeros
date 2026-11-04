@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.api.routes.profile import LOCAL_OWNER_ID
 from app.models.candidate import CandidateProfile
 from app.models.workflow import Application, Job, JobMatch, Reminder
-from app.services.dashboard import JAKARTA, utc_midnight
+from app.services.dashboard.service import JAKARTA, utc_midnight
 
 pytestmark = pytest.mark.usefixtures("enabled_job_matching")
 

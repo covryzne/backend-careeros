@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from app.services.agent_privacy import private_values, sanitize_payload, sanitize_text
-from app.services.profile import validate_values
+from app.services.agent.privacy import private_values, sanitize_payload, sanitize_text
+from app.services.profile.service import validate_values
 
 PROFESSIONAL_FIELDS = (
     "headline",
@@ -47,7 +47,7 @@ def snapshot(fields, *, require_professional=True):
 
 
 def ready_document(db, actor, document_id):
-    from app.services.documents import owned_document
+    from app.services.documents.service import owned_document
 
     item = owned_document(db, actor, document_id)
     if item.matching_snapshot is None:

@@ -5,8 +5,8 @@ from app.models.candidate import CandidateProfile
 from app.models.crawler import CrawlRun, CrawlRunItem
 from app.models.workflow import Job, JobMatch, JobSkill, JobSource
 from app.schemas.workflow import JobSummary
-from app.services import matching
-from app.services.skill_extraction import effective_skills
+from app.services.jobs import matching
+from app.services.jobs.skills import effective_skills
 
 
 def summarize_jobs(db, jobs):

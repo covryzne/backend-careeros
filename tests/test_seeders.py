@@ -8,8 +8,8 @@ from app.models.candidate import CandidateFact, CandidateProfile, CandidateSkill
 from app.models.foundation import CandidateDocument
 from app.models.workflow import Application, Job, JobMatch, JobSkill
 from app.schemas.profile import ProfileUpdate
-from app.services import profile
-from app.services.career import career_context
+from app.services.agent.career import career_context
+from app.services.profile import service as profile
 from scripts.seed_jobs import ALGORITHM, JOBS
 from scripts.seed_jobs import seed as seed_jobs
 from scripts.seed_real_profile import EXPERIENCES, PROFILE, PROJECTS, SKILLS

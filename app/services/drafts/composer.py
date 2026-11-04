@@ -2,7 +2,7 @@
 
 import re
 
-from app.services.agent_privacy import private_values, sanitize_text
+from app.services.agent.privacy import private_values, sanitize_text
 
 STOP = {
     "dan",
@@ -42,7 +42,7 @@ def tokens(text):
 
 
 def relevant_sources(choices, job):
-    from app.services.job_content import snapshot
+    from app.services.jobs.content import snapshot
 
     data = snapshot(job)
     job_tokens = tokens(" ".join(str(value or "") for value in data.values()))

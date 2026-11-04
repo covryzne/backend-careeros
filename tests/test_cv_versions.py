@@ -7,8 +7,8 @@ from test_cv_imports import CV_TEXT, make_pdf
 from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.foundation import CandidateDocument
-from app.services.career import career_context, validate_report
-from app.services.cv_matching import ready_document
+from app.services.agent.career import career_context, validate_report
+from app.services.documents.matching import ready_document
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def test_plain_upload_precedes_optional_parsing_and_preserves_pdf(
         raise AssertionError("Ordinary upload must not run extraction")
 
     with monkeypatch.context() as local:
-        local.setattr("app.services.cv_imports.parse_pdf", forbidden)
+        local.setattr('app.services.documents.imports.parse_pdf', forbidden)
         doc = upload(client)
     assert client.get("/api/v1/profile").status_code == 404
     assert client.get("/api/v1/profile/documents").json()["items"][0]["id"] == doc["id"]
@@ -219,7 +219,7 @@ def test_cv_ownership_review_validation_and_preparing_apply(jobs_client, storage
 def test_cv_scope_requires_review_and_detects_revision_changes(jobs_client, storage, monkeypatch):
     from app.core.config import settings
     from app.schemas.agent import RunCreate
-    from app.services.agent_runs import create_run
+    from app.services.agent.runs import create_run
 
     monkeypatch.setattr(settings, "agent_enabled", True)
     client, db = jobs_client

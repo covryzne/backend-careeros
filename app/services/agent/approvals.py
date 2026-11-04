@@ -9,10 +9,12 @@ from app.models.workflow import AgentRun
 from app.schemas.agent import ConfirmFactArguments, ManualApplyArguments, MoveArguments
 from app.schemas.profile import ProfileUpdate
 from app.schemas.workflow import ApplicationCreate, ApplicationUpdate
-from app.services import application_workflows, job_workflows, profile
-from app.services.agent_settings import policy_for
-from app.services.audit import audit
-from app.services.idempotency import fingerprint
+from app.services.agent.settings import policy_for
+from app.services.applications import workflows as application_workflows
+from app.services.jobs import workflows as job_workflows
+from app.services.profile import service as profile
+from app.services.shared.audit import audit
+from app.services.shared.idempotency import fingerprint
 
 
 def aware(value):

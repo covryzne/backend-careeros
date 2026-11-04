@@ -75,6 +75,10 @@ The PostgreSQL verification script needs a protected backup and database creatio
 
 ## Features
 
+Business services are grouped by feature under `app/services/`. See the
+[service structure and import guide](app/services/README.md) for responsibilities,
+module paths and worker entry points.
+
 Crawler activity summaries have a separate backfill/refresh process after migration
 `0018_crawler_daily_stats`. It publishes daily owner/platform counters every five
 minutes when run, without changing crawl execution. See the

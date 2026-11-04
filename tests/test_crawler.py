@@ -9,8 +9,8 @@ from app.core.security import ActorContext, get_actor
 from app.main import app
 from app.models.crawler import CrawlRun, CrawlWorkerSlot
 from app.models.workflow import Job
-from app.services import crawler_runs as service
-from app.services.crawler_ingestion import apply_event
+from app.services.crawler import runs as service
+from app.services.crawler.ingestion import apply_event
 
 CAPS = [
     {

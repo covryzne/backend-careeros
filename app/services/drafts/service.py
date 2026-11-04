@@ -5,9 +5,9 @@ from sqlalchemy import select
 
 from app.models.foundation import Draft, DraftVersion, ProfileProposal
 from app.schemas.profile import ProfileUpdate
-from app.services.audit import audit
-from app.services.job_workflows import get_job
-from app.services.profile import check_version, load_profile
+from app.services.jobs.workflows import get_job
+from app.services.profile.service import check_version, load_profile
+from app.services.shared.audit import audit
 
 
 def eligible_facts(profile):
@@ -25,14 +25,14 @@ def create_draft(db, actor, args, draft_type):
         raise HTTPException(404, "Profile not found")
     check_version(profile, args.source_profile_version, actor)
     job = get_job(db, actor, args.job_id)
-    from app.services.professional_sources import draft_sources
+    from app.services.profile.sources import draft_sources
 
     choices = draft_sources(profile)
     sources = {item["id"]: item for item in choices}
     selected_ids = list(dict.fromkeys(str(value) for value in args.source_ids))
     legacy = False
     if not selected_ids:
-        from app.services.draft_composer import relevant_sources
+        from app.services.drafts.composer import relevant_sources
 
         selected_ids = [item["id"] for item in relevant_sources(choices, job)]
     # Compatibility only for historical API callers; facts are not offered by the UI/tools.
@@ -54,8 +54,8 @@ def create_draft(db, actor, args, draft_type):
             "Lengkapi profil profesional, skill, project, atau experience sebagai sumber draft.",
         )
     selected = [sources[identity] for identity in selected_ids]
-    from app.services.draft_composer import compose
-    from app.services.job_content import snapshot
+    from app.services.drafts.composer import compose
+    from app.services.jobs.content import snapshot
 
     content = compose(job, selected, draft_type, args.language, profile)
     draft = Draft(
@@ -97,7 +97,7 @@ def owned_draft(db, actor, draft_id, lock=False):
 
 
 def draft_detail(db, actor, draft):
-    from app.services.job_content import snapshot
+    from app.services.jobs.content import snapshot
 
     try:
         job = get_job(db, actor, draft.job_id)

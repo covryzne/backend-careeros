@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.models.workflow import Application, Job, Reminder
-from app.services.audit import audit
+from app.services.shared.audit import audit
 
 
 def owned_reminder(db, actor, reminder_id, *, lock=False):

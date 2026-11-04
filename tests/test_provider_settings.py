@@ -15,7 +15,7 @@ from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.foundation import IdempotencyRecord, ProviderSetting
 from app.models.workflow import AgentRun, AuditEvent
-from app.services.provider_settings import config_for
+from app.services.providers.settings import config_for
 
 
 @pytest.fixture(autouse=True)

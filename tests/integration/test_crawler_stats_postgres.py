@@ -17,7 +17,7 @@ from app.db.base import Base
 from app.models.candidate import User
 from app.models.crawler import CrawlRun, CrawlRunSource
 from app.models.crawler_stats import CrawlerDailyStats, CrawlerStatsPublication
-from app.services.crawler_stats import PUBLISH_LOCK, refresh
+from app.services.crawler.stats import PUBLISH_LOCK, refresh
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("TEST_DATABASE_URL"), reason="Dedicated local PostgreSQL required"

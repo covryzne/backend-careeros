@@ -6,8 +6,8 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.foundation import AgentPreference
-from app.services.audit import audit
-from app.services.provider_settings import configured
+from app.services.providers.settings import configured
+from app.services.shared.audit import audit
 
 
 @dataclass(frozen=True)

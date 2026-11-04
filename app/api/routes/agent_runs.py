@@ -13,10 +13,11 @@ from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.models.foundation import AgentApproval
 from app.schemas.agent import AgentRunPage, AgentRunResponse, RunCreate, StrictInput
-from app.services import agent_runs, approvals
-from app.services.agent_settings import policy_for
-from app.services.idempotency import command
-from app.services.provider_settings import configured
+from app.services.agent import approvals
+from app.services.agent import runs as agent_runs
+from app.services.agent.settings import policy_for
+from app.services.providers.settings import configured
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 

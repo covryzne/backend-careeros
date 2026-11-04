@@ -21,7 +21,7 @@ from app.main import app
 from app.models.candidate import User
 from app.models.crawler import CrawlRun, CrawlWorkerSlot
 from app.schemas.crawler import CrawlCreate
-from app.services import crawler_runs as service
+from app.services.crawler import runs as service
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("TEST_DATABASE_URL"), reason="Dedicated local PostgreSQL required"

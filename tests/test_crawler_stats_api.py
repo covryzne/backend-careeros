@@ -8,7 +8,7 @@ from app.main import app
 from app.models.candidate import User
 from app.models.crawler import CrawlRun, CrawlRunSource
 from app.models.crawler_stats import CrawlerStatsPublication
-from app.services.crawler_stats import _publish
+from app.services.crawler.stats import _publish
 
 
 def seed(db, owner_id):

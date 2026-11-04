@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.skill_extraction import canonical, effective_skills, pattern_for
+from app.services.jobs.skills import canonical, effective_skills, pattern_for
 
 
 def extract(text, **fields):

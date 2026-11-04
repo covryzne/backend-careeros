@@ -20,8 +20,8 @@ def test_matching_disabled_preserves_cache_and_suppresses_scores(jobs_client, mo
     def unexpected(*args, **kwargs):
         raise AssertionError("Automatic matching and skill extraction must remain inactive")
 
-    monkeypatch.setattr("app.services.matching.load_profile", unexpected)
-    monkeypatch.setattr("app.services.jobs.effective_skills", unexpected)
+    monkeypatch.setattr('app.services.jobs.matching.load_profile', unexpected)
+    monkeypatch.setattr('app.services.jobs.summaries.effective_skills', unexpected)
     for result in [
         client.get("/api/v1/jobs").json()["items"][0],
         client.get("/api/v1/jobs/" + created["id"]).json(),

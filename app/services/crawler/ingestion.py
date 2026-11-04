@@ -8,11 +8,11 @@ from sqlalchemy import or_, select
 from app.core.security import ActorContext
 from app.models.crawler import CrawlRunItem, CrawlRunSource
 from app.models.workflow import Job, JobSource
-from app.services.audit import audit
-from app.services.crawler_dates import evaluate
-from app.services.crawler_events import append as append_event
-from app.services.idempotency import fingerprint, lock_owner
-from app.services.job_identity import normalize_url, url_hash
+from app.services.crawler.dates import evaluate
+from app.services.crawler.events import append as append_event
+from app.services.jobs.identity import normalize_url, url_hash
+from app.services.shared.audit import audit
+from app.services.shared.idempotency import fingerprint, lock_owner
 
 HOSTS = {
     "linkedin": {"www.linkedin.com", "id.linkedin.com", "linkedin.com"},

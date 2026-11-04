@@ -25,8 +25,10 @@ from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.models.foundation import CandidateDocument, Draft, ProfileProposal
 from app.schemas.agent import DraftArguments, StrictInput
-from app.services import documents, drafts, profile
-from app.services.idempotency import command
+from app.services.documents import service as documents
+from app.services.drafts import service as drafts
+from app.services.profile import service as profile
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 
@@ -258,7 +260,7 @@ def list_proposals(db: Session = Depends(get_db), actor: ActorContext = Depends(
 
 @router.get("/draft-sources")
 def get_draft_sources(db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    from app.services.professional_sources import draft_sources
+    from app.services.profile.sources import draft_sources
 
     actor.require("drafts:read")
     owner = profile.load_profile(db, actor)

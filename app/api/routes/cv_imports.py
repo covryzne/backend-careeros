@@ -10,8 +10,9 @@ from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.schemas.cv_import import CVApply, CVImportResponse, CVReview
 from app.schemas.profile import CandidateProfileResponse
-from app.services import cv_imports, documents
-from app.services.idempotency import command
+from app.services.documents import imports as cv_imports
+from app.services.documents import service as documents
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 

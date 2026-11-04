@@ -5,8 +5,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.models.crawler import CrawlRun, CrawlRunSource, CrawlWorkerSlot
-from app.services.crawler_events import append as append_event
-from app.services.idempotency import fingerprint, lock_owner
+from app.services.crawler.events import append as append_event
+from app.services.shared.idempotency import fingerprint, lock_owner
 
 ACTIVE = {"queued", "running"}
 

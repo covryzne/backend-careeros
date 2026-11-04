@@ -17,9 +17,9 @@ from app.core.security import ActorContext
 from app.crawler.engine import Engine, probe
 from app.db.session import SessionLocal
 from app.models.crawler import CrawlRun, CrawlRunItem, CrawlRunSource
-from app.services import crawler_runs as service
-from app.services.crawler_ingestion import apply_event
-from app.services.idempotency import lock_owner
+from app.services.crawler import runs as service
+from app.services.crawler.ingestion import apply_event
+from app.services.shared.idempotency import lock_owner
 
 log = logging.getLogger(__name__)
 

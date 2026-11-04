@@ -1,4 +1,4 @@
-from app.services.agent_privacy import private_values, sanitize_text
+from app.services.agent.privacy import private_values, sanitize_text
 
 
 def draft_sources(owner, *, max_chars=2000):

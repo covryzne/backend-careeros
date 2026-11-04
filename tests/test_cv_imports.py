@@ -10,8 +10,8 @@ from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.foundation import CandidateDocument, CVImport
-from app.services.career import career_context, validate_report
-from app.services.cv_parser import parse_text
+from app.services.agent.career import career_context, validate_report
+from app.services.documents.parser import parse_text
 
 CV_TEXT = """Ayu Candidate
 Backend Engineer
@@ -322,7 +322,7 @@ def test_large_text_pdf_upload_uses_document_body_limit(jobs_client, storage):
 def test_page_limit_and_timeout_are_clear_and_leave_no_profile(jobs_client, storage, monkeypatch):
     import subprocess
 
-    from app.services import cv_imports
+    from app.services.documents import imports as cv_imports
 
     client, _ = jobs_client
     writer = PdfWriter()

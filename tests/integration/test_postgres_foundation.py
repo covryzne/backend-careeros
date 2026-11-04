@@ -16,7 +16,11 @@ from app.models.workflow import Application, AuditEvent
 from app.schemas.agent import MoveArguments, RunCreate
 from app.schemas.profile import CandidateSkillCreate, ProfileUpdate
 from app.schemas.workflow import ApplicationCreate, JobCreate
-from app.services import agent_runs, application_workflows, approvals, job_workflows, profile
+from app.services.agent import approvals
+from app.services.agent import runs as agent_runs
+from app.services.applications import workflows as application_workflows
+from app.services.jobs import workflows as job_workflows
+from app.services.profile import service as profile
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("TEST_DATABASE_URL"), reason="Dedicated PostgreSQL test database required"
@@ -132,7 +136,7 @@ def test_concurrent_profile_writes_and_approval_exactly_once(pg, monkeypatch):
 
 def test_concurrent_cv_versions_are_monotonic_per_role(pg, tmp_path, monkeypatch):
     from app.models.foundation import CandidateDocument
-    from app.services.documents import upload_document
+    from app.services.documents.service import upload_document
 
     monkeypatch.setattr(settings, "document_storage_dir", tmp_path)
     actor = ActorContext(uuid.uuid4())
@@ -158,7 +162,7 @@ def test_concurrent_cv_versions_are_monotonic_per_role(pg, tmp_path, monkeypatch
 
 def test_concurrent_matching_refresh_uses_one_current_cache_row(pg):
     from app.models.workflow import JobMatch
-    from app.services.matching import ALGORITHM, refresh
+    from app.services.jobs.matching import ALGORITHM, refresh
 
     actor = ActorContext(uuid.uuid4())
     with pg() as db:

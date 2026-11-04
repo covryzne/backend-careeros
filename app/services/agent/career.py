@@ -5,8 +5,11 @@ import uuid
 from datetime import UTC, datetime
 
 from app.schemas.agent import CareerReport
-from app.services import application_workflows, dashboard, job_workflows, profile
-from app.services.agent_privacy import private_values, sanitize_text
+from app.services.agent.privacy import private_values, sanitize_text
+from app.services.applications import workflows as application_workflows
+from app.services.dashboard import service as dashboard
+from app.services.jobs import workflows as job_workflows
+from app.services.profile import service as profile
 
 
 def career_context(db, actor, scope):
@@ -108,7 +111,7 @@ def career_context(db, actor, scope):
                 )
             )
     if scope.get("document_id"):
-        from app.services import cv_matching
+        from app.services.documents import matching as cv_matching
 
         # Replace professional sources so other role versions cannot influence this analysis.
         sources.clear()

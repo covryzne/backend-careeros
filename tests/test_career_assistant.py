@@ -11,7 +11,7 @@ from app.agent.worker import claim_next
 from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.models.workflow import AgentRun
-from app.services.career import career_context, validate_report
+from app.services.agent.career import career_context, validate_report
 
 
 @pytest.fixture

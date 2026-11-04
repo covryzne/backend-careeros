@@ -15,9 +15,11 @@ from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.db.session import SessionLocal
 from app.models.workflow import Job, JobMatch, JobSkill
 from app.schemas.workflow import JobCreate
-from app.services import job_workflows, matching, profile
-from app.services.audit import audit
-from app.services.idempotency import lock_owner
+from app.services.jobs import matching
+from app.services.jobs import workflows as job_workflows
+from app.services.profile import service as profile
+from app.services.shared.audit import audit
+from app.services.shared.idempotency import lock_owner
 from scripts.seed_data import jobs_for
 
 JOBS = jobs_for(datetime.now(UTC).date())
