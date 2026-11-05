@@ -1,5 +1,7 @@
 # CareerOS Backend
 
+Staging API now uses Supabase Auth user JWT verification. See [STAGING.md](STAGING.md) for setup, ownership, seeding and server deployment. Historical local-only rollout notes below do not supersede that staging authentication contract.
+
 Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Apply Alembic head, start the existing API, and run `.venv/Scripts/python.exe -m app.crawler.worker` in another terminal. Scheduling and CSV import are deferred. No second crawler HTTP service is needed.
 
 FastAPI modular monolith with PostgreSQL persistence, shared business services and a disabled-by-default bounded agent foundation. Local/private rollout; production authentication is not yet configured and production startup fails closed.

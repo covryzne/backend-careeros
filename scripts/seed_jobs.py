@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.db.session import SessionLocal
 from app.models.workflow import Job, JobMatch, JobSkill
@@ -21,6 +20,7 @@ from app.services.profile import service as profile
 from app.services.shared.audit import audit
 from app.services.shared.idempotency import lock_owner
 from scripts.seed_data import jobs_for
+from scripts.seed_options import add_owner_options, check_staging_user, seed_actor
 
 JOBS = jobs_for(datetime.now(UTC).date())
 ALGORITHM = matching.ALGORITHM
@@ -107,12 +107,13 @@ def seed(db, actor=None):
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    if settings.app_env not in {"development", "test"}:
-        raise SystemExit("Seed jobs hanya untuk database development/test.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_owner_options(parser)
+    actor = seed_actor(parser.parse_args())
     try:
         with SessionLocal.begin() as db:
-            result = seed(db)
+            check_staging_user(db, actor)
+            result = seed(db, actor)
     except SQLAlchemyError:
         raise SystemExit(
             "Seed jobs gagal. Periksa DATABASE_URL dan jalankan python -m alembic upgrade head."

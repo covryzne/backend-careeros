@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,8 +10,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    app_env: str = "development"
+    app_env: Literal["development", "test", "staging", "production"] = "development"
     allow_local_identity: bool = True
+    supabase_url: str | None = None
+    supabase_jwks_url: str | None = None
+    supabase_jwt_audience: str = "authenticated"
+    auth_jwks_timeout_seconds: float = Field(default=5, gt=0, le=30)
+    auth_jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
     require_profile_version: bool = False
     job_matching_enabled: bool = False
     agent_runtime_allowed: bool = True
@@ -40,6 +47,45 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def auth_endpoints(self) -> tuple[str, str]:
+        """Only deployment configuration chooses the trusted issuer and keys URL."""
+        base = (self.supabase_url or "").rstrip("/")
+        parsed = urlsplit(base)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("SUPABASE_URL must be an HTTPS project origin")
+        issuer = f"{base}/auth/v1"
+        jwks = f"{issuer}/.well-known/jwks.json"
+        if self.supabase_jwks_url and self.supabase_jwks_url != jwks:
+            raise ValueError("SUPABASE_JWKS_URL must match SUPABASE_URL's Auth JWKS endpoint")
+        if not self.supabase_jwt_audience.strip():
+            raise ValueError("SUPABASE_JWT_AUDIENCE is required")
+        return issuer, jwks
+
+    def validate_deployment(self) -> None:
+        if self.app_env in {"development", "test"}:
+            return
+        if self.allow_local_identity:
+            raise ValueError("ALLOW_LOCAL_IDENTITY must be false outside development/test")
+        self.auth_endpoints()
+        if not self.allowed_origins or "*" in self.allowed_origins:
+            raise ValueError("Explicit ALLOWED_ORIGINS are required for deployment")
+        from cryptography.fernet import Fernet
+
+        try:
+            if not self.provider_encryption_key:
+                raise ValueError()
+            Fernet(self.provider_encryption_key.get_secret_value().encode())
+        except (ValueError, TypeError):
+            raise ValueError("A valid stable PROVIDER_ENCRYPTION_KEY is required") from None
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

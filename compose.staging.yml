@@ -1,4 +1,4 @@
-# Staging/production startup currently blocked by application authentication guard.
+# Supabase user JWTs protect APIs; deployment validates Auth configuration at startup.
 name: careeros-backend-staging
 services:
   backend:

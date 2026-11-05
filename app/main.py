@@ -18,10 +18,7 @@ from app.db.session import database_health
 
 @asynccontextmanager
 async def lifespan(_app):
-    if settings.app_env not in {"development", "test"}:
-        raise RuntimeError(
-            "Production authentication is not configured; local identity cannot be used for deployment"
-        )
+    settings.validate_deployment()
     task = None
     if (
         settings.app_env == "development"

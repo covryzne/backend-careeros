@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Supabase Auth JWKS dependency fixture
+  version: 1.0.0
+  description: Public key discovery only. Synthetic keys; no real project credentials.
+servers:
+  - url: https://auth-fixture.supabase.co
+paths:
+  /auth/v1/.well-known/jwks.json:
+    get:
+      responses:
+        '200':
+          description: JSON Web Key Set; actual asymmetric public keys supplied by the test.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+              example:
+                keys: []
+        '503':
+          description: Simulated key discovery outage.
