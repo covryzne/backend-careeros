@@ -1,0 +1,40 @@
+# Staging/production startup currently blocked by application authentication guard.
+name: careeros-backend-development
+services:
+  backend:
+    build:
+      context: .
+    image: careeros-backend:development-${IMAGE_TAG:-local}
+    init: true
+    restart: "no"
+    env_file:
+      - path: ${APP_ENV_FILE:-.env.development}
+        format: raw
+    environment:
+      APP_ENV: development
+      ALLOW_LOCAL_IDENTITY: "true"
+      DOCUMENT_STORAGE_DIR: /data/careeros/documents
+    ports:
+      - "127.0.0.1:8001:8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - documents:/data/careeros/documents
+      - ./app:/app/backend/app:ro
+      - ./alembic:/app/backend/alembic:ro
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8001/health',timeout=5)); assert r['database']=='ok'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    mem_limit: 768m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  documents:
