@@ -1,4 +1,4 @@
-# Staging/production startup currently blocked by application authentication guard.
+# Same application source as staging; local services are selected by development configuration.
 name: careeros-backend-development
 services:
   backend:
@@ -12,7 +12,8 @@ services:
         format: raw
     environment:
       APP_ENV: development
-      ALLOW_LOCAL_IDENTITY: "true"
+      ALLOW_LOCAL_IDENTITY: "false"
+      LOCAL_AUTH_ENABLED: ${LOCAL_AUTH_ENABLED:-true}
       DOCUMENT_STORAGE_DIR: /data/careeros/documents
     ports:
       - "127.0.0.1:8001:8001"

@@ -12,6 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     app_env: Literal["development", "test", "staging", "production"] = "development"
     allow_local_identity: bool = True
+    local_auth_enabled: bool = False
     supabase_url: str | None = None
     supabase_jwks_url: str | None = None
     supabase_jwt_audience: str = "authenticated"
@@ -73,6 +74,8 @@ class Settings(BaseSettings):
     def validate_deployment(self) -> None:
         if self.app_env in {"development", "test"}:
             return
+        if self.local_auth_enabled:
+            raise ValueError("LOCAL_AUTH_ENABLED must be false outside development")
         if self.allow_local_identity:
             raise ValueError("ALLOW_LOCAL_IDENTITY must be false outside development/test")
         self.auth_endpoints()

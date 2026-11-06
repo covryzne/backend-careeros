@@ -28,3 +28,7 @@ api_router.include_router(cv_imports_router, tags=["cv-imports"])
 from app.api.routes.crawler import router as crawler_router
 
 api_router.include_router(crawler_router, prefix="/crawler", tags=["crawler"])
+
+from app.api.routes.local_auth import router as local_auth_router
+
+api_router.include_router(local_auth_router, prefix="/local-auth", tags=["local-auth"])

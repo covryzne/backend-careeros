@@ -7,8 +7,10 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKSetError
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.session import get_db
 
 LOCAL_OWNER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _APPROVAL_CAPABILITY = object()
@@ -107,7 +109,14 @@ class ActorContext:
 
 def get_actor(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
+    db: Annotated[Session, Depends(get_db)] = None,
 ) -> ActorContext:
+    if settings.app_env == "development" and settings.local_auth_enabled:
+        from app.services.local_auth import account_for_token
+        if credentials is None:
+            raise unauthorized()
+        account = account_for_token(db, credentials.credentials)
+        return ActorContext(account.user_id)
     if credentials is None:
         if settings.app_env in {"development", "test"} and settings.allow_local_identity:
             return ActorContext(LOCAL_OWNER_ID)
