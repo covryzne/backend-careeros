@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import logging
 import os
+import signal
 import socket
 import time
 import uuid
@@ -227,9 +228,24 @@ def recover(run_id):
     transaction(SessionLocal, action)
 
 
+def validate_worker_settings():
+    if settings.app_env not in {"development", "test", "staging"}:
+        raise RuntimeError("Crawler worker supports development/test/staging only")
+    if settings.app_env == "staging" and settings.allow_local_identity:
+        raise RuntimeError("Staging worker requires ALLOW_LOCAL_IDENTITY=false")
+    if settings.agent_worker_embedded:
+        raise RuntimeError("Separate crawler worker requires AGENT_WORKER_EMBEDDED=false")
+
+
 async def main(once=False):
-    if settings.app_env not in {"development", "test"}:
-        raise RuntimeError("Phase A worker supports private development/test only")
+    validate_worker_settings()
+    log.info(
+        "Crawler worker config: environment=%s browser_mode=%s timeout_seconds=%s lease_seconds=%s",
+        settings.app_env,
+        settings.crawler_browser_mode,
+        settings.crawler_run_timeout_seconds,
+        settings.crawler_lease_seconds,
+    )
     log.info("Starting crawler worker; checking installed Selenium adapters...")
     capabilities = probe()  # Discover the installed Selenium engine, not UI constants.
     worker_id = f"{socket.gethostname()[:60]}|{os.getpid()}|{uuid.uuid4().hex[:12]}"
@@ -281,6 +297,25 @@ def waiting_notice(db):
     return f"Slot reserved for run {state.active_run_id}; waiting for its state to change."
 
 
+async def serve(once=False):
+    """Docker SIGTERM cancels work through the existing browser/lease cleanup path."""
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(main(once))
+    registered = False
+    try:
+        try:
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
+            registered = True
+        except NotImplementedError:  # Windows host development uses asyncio's Ctrl+C handling.
+            pass
+        await task
+    except asyncio.CancelledError:
+        log.info("Crawler worker stopped after cancellation cleanup")
+    finally:
+        if registered:
+            loop.remove_signal_handler(signal.SIGTERM)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -297,4 +332,4 @@ if __name__ == "__main__":
             )
         recover(args.recover)
     else:
-        asyncio.run(main(args.once))
+        asyncio.run(serve(args.once))
