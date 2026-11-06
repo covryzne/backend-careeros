@@ -12,6 +12,9 @@ from app.db.connection import connection_options
         "postgresql+psycopg://fixture:fixture@localhost:5434/fixture",
         "postgresql+psycopg://fixture:fixture@pooler.example:6543/postgres?sslmode=require",
         "postgresql+psycopg://fixture:fixture@pooler.example:5432/postgres?sslmode=require",
+        "postgresql://fixture:fixture@localhost:5434/fixture",
+        "postgresql://fixture:fixture@pooler.example:6543/postgres?sslmode=require",
+        "postgresql://fixture:fixture@pooler.example:5432/postgres?sslmode=require",
     ],
 )
 @pytest.mark.parametrize("migration", [False, True])
@@ -42,6 +45,11 @@ def test_psycopg_receives_none_not_zero_for_all_connection_modes(url, migration,
             assert captured["sslmode"] == "require"
     finally:
         engine.dispose()
+
+
+def test_other_explicit_postgres_drivers_keep_their_own_options():
+    assert connection_options("postgresql+psycopg2://fixture:fixture@localhost/fixture") == {}
+    assert connection_options("postgresql+asyncpg://fixture:fixture@localhost/fixture") == {}
 
 
 def test_sqlite_does_not_receive_postgres_only_parameters():

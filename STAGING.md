@@ -66,6 +66,8 @@ Scripts are now included in the image, so no Windows/host bind mount is needed. 
 
 ## Verification and boundaries
 
+Prepared-statement options resolve SQLAlchemy's effective driver. Both explicit `postgresql+psycopg://` and plain `postgresql://` (SQLAlchemy 2.1 defaults to psycopg) receive `prepare_threshold=None`. Earlier helper versions matched only the explicit spelling, leaving the default threshold 5 active for plain URLs. Other explicitly chosen drivers keep their own options. To inspect without revealing a DSN: `python -c "from app.db.session import engine; from app.db.connection import connection_options; print('url_driver=', engine.url.drivername); print('effective_driver=', engine.dialect.driver); print('options=', connection_options(engine.url))"`.
+
 - Signed synthetic ES256 and RS256 tests cover ownership isolation, tampering, expired tokens, wrong issuer/audience/role/subject and unavailable key discovery.
 - Startup tests cover missing Auth configuration, local identity leakage, wildcard origins and missing encryption keys.
 - Real JWKS HTTP behavior is exercised by `tests/test_auth_simulation.py` using the local Postman fixture. See `postman/simulations/staging-auth.context.yaml` for evidence and replay instructions.
