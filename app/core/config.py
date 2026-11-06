@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -100,7 +101,18 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    selected = os.environ.get("APP_ENV_FILE")
+    if selected is None:
+        return Settings()
+    if not selected.strip():
+        raise ValueError("APP_ENV_FILE must name an existing env file")
+    path = Path(selected).expanduser()
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    if not path.is_file():
+        raise ValueError(f"APP_ENV_FILE does not exist: {path}")
+    # Pydantic keeps process environment ahead of the explicitly selected file.
+    return Settings(_env_file=path)
 
 
 settings = get_settings()

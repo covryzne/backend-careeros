@@ -24,6 +24,44 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 
 Health: `/health`; interactive schema: `/docs`; generated contract: `/openapi.json`.
 
+### Manual development with an environment-specific file
+
+Activate the existing conda/venv environment and install this repo's requirements.
+Fill the ignored `.env.development` at the backend repo root using
+`.env.development.example` as a template; keep PostgreSQL on the laptop. Native
+Python uses `localhost` for that database, not `host.docker.internal`.
+
+From the backend repo:
+
+```powershell
+python app/main.py --env-file .env.development
+```
+
+From the `app` directory, `python main.py --env-file .env.development` also works:
+relative env paths resolve against the backend repo, not the terminal directory.
+With no flag or `APP_ENV_FILE`, the existing root `.env` remains the default.
+The application does not guess an environment from the Git branch or merge files
+from multiple environments. Process environment values override file values.
+
+For Alembic, Uvicorn or the standalone worker, select the same file through the
+process environment (commands below run from the backend repo):
+
+```powershell
+$env:APP_ENV_FILE = '.env.development'
+python -m alembic upgrade head
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+```
+
+For Windows CMD, use `set "APP_ENV_FILE=.env.development"` instead of the
+PowerShell assignment. Run `python -m app.crawler.worker` in a separate terminal
+with the same file selected and `AGENT_WORKER_EMBEDDED=false` for that worker.
+
+Docker staging still starts `uvicorn app.main:app --host 0.0.0.0 --port 8001` and
+receives configuration through Compose `env_file`/`environment`. Compose's host
+variable `APP_ENV_FILE` selects that file; it is not automatically injected into
+the container. Do not add `APP_ENV_FILE` inside the private env file unless that
+path also exists inside the container. No development file is auto-loaded in Docker.
+
 ## Local seed data
 
 From `backend-careeros`, with the virtual environment active and `DATABASE_URL`
