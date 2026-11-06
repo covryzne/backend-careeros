@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import ActorContext
+from app.crawler.diagnostics import log_failure
 from app.crawler.engine import Engine, probe
 from app.db.session import SessionLocal
 from app.models.crawler import CrawlRun, CrawlRunItem, CrawlRunSource
@@ -157,34 +158,31 @@ async def execute(run_id, token, worker_id, *, factory=SessionLocal, engine_fact
     except asyncio.CancelledError:
         failure = "WORKER_INTERRUPTED"
         raise
-    except Exception:
+    except Exception as exc:
         failure = failure or "CRAWLER_EXECUTION_FAILED"
-        log.error("Crawler run %s failed; inspect source outcomes", run_id)
+        log_failure(log, "execute", exc, run_id)
     finally:
         work.cancel()
         try:
             await work
         except asyncio.CancelledError:
             pass
-        except Exception:
-            log.error("Crawler task ended with an execution error")
+        except Exception as exc:
+            log_failure(log, "crawl_cleanup", exc, run_id)
         pulse.cancel()
         try:
             await pulse
         except asyncio.CancelledError:
             pass
-        except Exception:
-            log.error("Crawler heartbeat task ended with an ownership/database error")
+        except Exception as exc:
+            log_failure(log, "heartbeat", exc, run_id)
         if clean:
             try:
                 transaction(
                     factory, lambda db: service.finish(db, run_id, worker_id, token, failure)
                 )
-            except Exception:
-                log.error(
-                    "Crawler run %s retained for safe recovery; ownership/database unavailable",
-                    run_id,
-                )
+            except Exception as exc:
+                log_failure(log, "finish_retained_slot", exc, run_id)
         log.info("Crawler run %s ended after %.1fs", run_id, time.monotonic() - started)
 
 
@@ -275,8 +273,8 @@ async def main(once=False):
                     last_notice = notice
             if once:
                 return
-        except Exception:
-            log.error("Crawler polling unavailable; no execution started")
+        except Exception as exc:
+            log_failure(log, "polling", exc)
             if once:
                 raise
         await asyncio.sleep(2)
