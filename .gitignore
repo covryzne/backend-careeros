@@ -8,6 +8,11 @@ __pycache__/
 !.env.*.example
 *.py[cod]
 
+node_modules/
+.next/
+package.json
+package-lock.json
+npm-debug.log*
 
 .private-documents/
 .verification/
