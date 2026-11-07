@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from app.core.config import Settings, settings
 from app.core.security import ActorContext, get_actor
 from app.main import app
 from app.models.crawler import CrawlRun, CrawlWorkerSlot
@@ -77,6 +78,51 @@ def test_invalid_parameters_never_enqueue(crawler, params):
     client, db = crawler
     assert create(client, **params).status_code == 422
     assert db.scalar(select(func.count()).select_from(CrawlRun)) == 0
+
+
+def test_portal_policy_hides_disabled_adapters_and_rejects_direct_requests(crawler, monkeypatch):
+    client, db = crawler
+    state = db.get(CrawlWorkerSlot, 1)
+    state.capabilities = [*CAPS, {**CAPS[0], "platform": "indeed"}]
+    db.commit()
+    monkeypatch.setattr(settings, "crawler_enabled_portals", "linkedin")
+    caps = client.get("/api/v1/crawler/capabilities").json()
+    assert [p["platform"] for p in caps["platforms"]] == ["linkedin"]
+    response = create(client, platforms=["indeed"])
+    assert response.status_code == 422 and "disabled" in response.text
+    assert db.scalar(select(func.count()).select_from(CrawlRun)) == 0
+    monkeypatch.setattr(settings, "crawler_enabled_portals", "linkedin,indeed")
+    assert create(client, platforms=["indeed"]).status_code == 202
+    # Turning it off never hides history or breaks idempotent replay of that run.
+    monkeypatch.setattr(settings, "crawler_enabled_portals", "linkedin")
+    assert create(client, platforms=["indeed"]).status_code == 202
+    assert client.get("/api/v1/crawler/runs").json()["total"] == 1
+    assert len(state.capabilities) == 2
+
+
+def test_empty_portal_policy_disables_all_new_runs(crawler, monkeypatch):
+    client, _db = crawler
+    monkeypatch.setattr(settings, "crawler_enabled_portals", "")
+    assert client.get("/api/v1/crawler/capabilities").json()["platforms"] == []
+    assert create(client).status_code == 422
+
+
+def test_portal_env_is_normalized_and_typos_rejected(monkeypatch):
+    monkeypatch.delenv("CRAWLER_ENABLED_PORTALS", raising=False)
+    config = Settings(
+        _env_file=None,
+        database_url="sqlite://",
+        crawler_enabled_portals=" LinkedIn, indeed,linkedin ",
+    )
+    assert config.enabled_crawler_portals() == {"linkedin", "indeed"}
+    assert (
+        Settings(
+            _env_file=None, database_url="sqlite://", crawler_enabled_portals=""
+        ).enabled_crawler_portals()
+        == set()
+    )
+    with pytest.raises(ValueError, match="unsupported portal"):
+        Settings(_env_file=None, database_url="sqlite://", crawler_enabled_portals="linkdin")
 
 
 def test_required_key_and_owner_isolation(crawler):

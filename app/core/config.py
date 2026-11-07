@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     crawler_browser_mode: str = Field(default="auto", pattern="^(auto|headed|headless)$")
     crawler_run_timeout_seconds: int = Field(default=3600, ge=60, le=14400)
     crawler_lease_seconds: int = Field(default=30, ge=15, le=120)
+    # Deployment policy, separate from adapters installed/reported by the worker.
+    crawler_enabled_portals: str = "linkedin,jobstreet,glints,dealls,kalibrr,techinasia"
     api_v1_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
 
@@ -49,6 +51,21 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("crawler_enabled_portals")
+    @classmethod
+    def validate_crawler_portals(cls, value: str) -> str:
+        known = {"linkedin", "jobstreet", "glints", "indeed", "dealls", "kalibrr", "techinasia"}
+        portals = list(
+            dict.fromkeys(part.strip().lower() for part in value.split(",") if part.strip())
+        )
+        if set(portals) - known:
+            raise ValueError("CRAWLER_ENABLED_PORTALS contains unsupported portal names")
+        # An explicitly empty value disables all new dashboard/API crawls.
+        return ",".join(portals)
+
+    def enabled_crawler_portals(self) -> set[str]:
+        return set(filter(None, self.crawler_enabled_portals.split(",")))
 
     def auth_endpoints(self) -> tuple[str, str]:
         """Only deployment configuration chooses the trusted issuer and keys URL."""

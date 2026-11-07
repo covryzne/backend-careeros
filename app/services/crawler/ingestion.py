@@ -285,11 +285,23 @@ def apply_event(db, run, platform, keyword, event):
             else "completed"
         )
         source.finished_at = datetime.now(UTC)
+        completion_note = (
+            {
+                "listing_exhausted": "Seluruh hasil tersedia sudah diproses; listing sudah habis.",
+                "empty_or_end": "Seluruh hasil tersedia sudah diproses; listing sudah habis.",
+                "max_pages": "Batas maksimal halaman/batch tercapai.",
+                "max_jobs": "Batas lowongan per portal tercapai.",
+                "no_new_ids": "Listing tidak menghasilkan ID lowongan baru; pencarian dihentikan.",
+            }.get(event.get("stop_reason"), "")
+            if event["state"] == "completed"
+            else ""
+        )
         append_event(
             db,
             run,
             f"Portal selesai: {source.status}. Baru: {source.jobs_new}; "
             f"duplikat: {source.jobs_duplicate}; filter tanggal: {source.jobs_filtered}. "
+            + (completion_note + " " if completion_note else "")
             + (f"Keterangan: {source.error}." if source.error else ""),
             platform=platform,
             level="WARN" if has_error else "INFO",

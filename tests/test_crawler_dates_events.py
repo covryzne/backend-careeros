@@ -149,6 +149,30 @@ def test_historical_config_is_not_reinterpreted(kalibrr):
     assert db.scalar(select(func.count()).select_from(Job)) == 1
 
 
+def test_exhausted_listing_is_success_and_logs_human_reason(kalibrr):
+    client, db, run = kalibrr
+    ingest(db, run, "2026-11-04")
+    apply_event(
+        db,
+        run,
+        "kalibrr",
+        "Data Engineer",
+        {
+            "type": "source_finished",
+            "state": "completed",
+            "stop_reason": "listing_exhausted",
+        },
+    )
+    db.commit()
+    service.finish(db, run.id, "date-worker", run.fencing_token)
+    db.commit()
+    assert run.status == "completed"
+    logs = client.get(f"/api/v1/crawler/runs/{run.id}/events").json()["items"]
+    assert any(
+        "listing sudah habis" in entry["message"] and entry["level"] == "INFO" for entry in logs
+    )
+
+
 def test_events_cursor_and_owner_isolation(kalibrr):
     client, db, run = kalibrr
     ingest(db, run, "2026-11-04")

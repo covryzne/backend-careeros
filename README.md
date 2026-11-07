@@ -1,5 +1,10 @@
 # CareerOS Backend
 
+For Google login with a local application database, use `.env.google.example` and
+the [Google Auth setup guide](../careeros-frontend/GOOGLE_AUTH_SETUP.md). Configure
+the same Supabase Auth project on both services; do not migrate local data or copy
+Google secrets into backend settings.
+
 Staging API now uses Supabase Auth user JWT verification. See [STAGING.md](STAGING.md) for setup, ownership, seeding and server deployment. Historical local-only rollout notes below do not supersede that staging authentication contract.
 
 Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Apply Alembic head, start the existing API, and run `.venv/Scripts/python.exe -m app.crawler.worker` in another terminal. Scheduling and CSV import are deferred. No second crawler HTTP service is needed.
@@ -155,3 +160,17 @@ Apply additive migration `0011_agent_preferences` before starting this version. 
 ## CV import
 
 Install the updated requirements (pypdf is required), then apply additive migration 0012_cv_imports. The profile CV (PDF) menu parses text PDFs locally into editable fields and merges them on save. No provider is needed for parsing. Scans/OCR and password-protected files are not supported. Profile data feeds matching/drafts directly; the Verified Facts user feature has been retired. See [CV_IMPORT.md](../specs-careeros/CV_IMPORT.md).
+
+### Crawler portal availability
+
+Set `CRAWLER_ENABLED_PORTALS=linkedin,jobstreet,glints,dealls,kalibrr,techinasia`
+in the backend environment (`.env.development` locally, `.env.staging` on staging).
+Restart/recreate the backend API after changing it. Names are normalized and deduplicated;
+unknown names fail configuration validation. An explicitly empty value disables all new
+API crawls. If omitted, the six portals above are enabled; Indeed is excluded by default.
+
+The capabilities endpoint exposes the intersection of this policy and installed worker
+adapters. New requests for disabled portals return 422. Existing runs, idempotent replays,
+results and portal history remain accessible. Enabling `indeed` later does not configure
+Chrome profiles or guarantee portal access. This policy does not remove CLI adapters and
+does not require a frontend env variable or database migration.
