@@ -125,3 +125,25 @@ def test_old_definition_requires_refresh(jobs_client):
     db.get(CrawlerStatsPublication, LOCAL_OWNER_ID).definition_version = 1
     db.commit()
     assert client.get("/api/v1/crawler/stats?from=2026-10-01&to=2026-10-03").status_code == 503
+
+
+def test_new_owner_waits_for_next_publication_and_never_receives_other_owners_batch(jobs_client):
+    client, db = jobs_client
+    older_owner = uuid.uuid4()
+    seed(db, older_owner)
+    publish(db)
+    seed(db, LOCAL_OWNER_ID)  # Joined/crawled after the last publisher pass.
+    path = "/api/v1/crawler/stats?from=2026-10-03&to=2026-10-05"
+    assert client.get(path).status_code == 503
+    app.dependency_overrides[get_actor] = lambda: ActorContext(older_owner)
+    try:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()["totals"]["jobs_new"] == 10
+    finally:
+        app.dependency_overrides.pop(get_actor, None)
+    # Refresh publishes every current owner without changing runs or jobs.
+    publish(db)
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.json()["totals"]["jobs_new"] == 10

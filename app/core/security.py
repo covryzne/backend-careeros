@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKSetError
 from sqlalchemy.orm import Session
@@ -110,15 +110,29 @@ class ActorContext:
 def get_actor(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
+    expected_account_id: Annotated[uuid.UUID | None, Header(alias="X-CareerOS-Account")] = None,
 ) -> ActorContext:
+    def account(owner_id: uuid.UUID) -> ActorContext:
+        # Consistency guard only: the verified session remains the sole authority.
+        if expected_account_id is not None and expected_account_id != owner_id:
+            raise HTTPException(
+                409,
+                {
+                    "code": "ACCOUNT_SESSION_CHANGED",
+                    "message": "Akun sesi berubah. Muat ulang dashboard sebelum melanjutkan.",
+                },
+            )
+        return ActorContext(owner_id)
+
     if settings.app_env == "development" and settings.local_auth_enabled:
         from app.services.local_auth import account_for_token
+
         if credentials is None:
             raise unauthorized()
-        account = account_for_token(db, credentials.credentials)
-        return ActorContext(account.user_id)
+        local_account = account_for_token(db, credentials.credentials)
+        return account(local_account.user_id)
     if credentials is None:
         if settings.app_env in {"development", "test"} and settings.allow_local_identity:
-            return ActorContext(LOCAL_OWNER_ID)
+            return account(LOCAL_OWNER_ID)
         raise unauthorized()
-    return ActorContext(verified_owner(credentials.credentials))
+    return account(verified_owner(credentials.credentials))

@@ -119,6 +119,33 @@ def test_authenticated_owners_are_isolated(jobs_client, staging, signer):
     assert db.get(User, security.LOCAL_OWNER_ID) is None
 
 
+def test_stale_tab_account_cannot_read_or_write_as_the_new_cookie_owner(
+    jobs_client, staging, signer
+):
+    client, _db = jobs_client
+    first, second = uuid.uuid4(), uuid.uuid4()
+    a = {"Authorization": f"Bearer {signer(first)}", "X-CareerOS-Account": str(first)}
+    b = {"Authorization": f"Bearer {signer(second)}", "X-CareerOS-Account": str(second)}
+    assert (
+        client.patch("/api/v1/profile", headers=a, json={"full_name": "Account A"}).status_code
+        == 200
+    )
+    stale = {**b, "X-CareerOS-Account": str(first)}
+    for method, payload in (
+        (client.get, {}),
+        (client.patch, {"json": {"full_name": "Stale A form"}}),
+    ):
+        response = method("/api/v1/profile", headers=stale, **payload)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "ACCOUNT_SESSION_CHANGED"
+    assert client.get("/api/v1/profile", headers=b).status_code == 404
+    assert client.get("/api/v1/profile", headers=a).json()["full_name"] == "Account A"
+    # The consistency header never grants access without a valid user token.
+    assert (
+        client.get("/api/v1/profile", headers={"X-CareerOS-Account": str(first)}).status_code == 401
+    )
+
+
 @pytest.mark.parametrize(
     "claims",
     [
