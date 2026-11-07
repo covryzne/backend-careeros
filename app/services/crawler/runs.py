@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.models.crawler import CrawlRun, CrawlRunSource, CrawlWorkerSlot
 from app.services.crawler.events import append as append_event
 from app.services.shared.idempotency import fingerprint, lock_owner
@@ -92,7 +93,11 @@ def capabilities(db, actor):
     )
     return {
         "engine": "selenium",
-        "platforms": state.capabilities if state else [],
+        "platforms": [
+            c for c in state.capabilities if c["platform"] in settings.enabled_crawler_portals()
+        ]
+        if state
+        else [],
         "worker_online": online,
         "active": bool(current or (state and state.active_run_id)),
         "active_run_id": current.id if current and current.owner_id == actor.owner_id else None,
@@ -133,6 +138,8 @@ def enqueue(db, actor, payload, key):
         )
     installed = {c["platform"]: c for c in state.capabilities}
     for platform in payload.platforms:
+        if platform not in settings.enabled_crawler_portals():
+            raise HTTPException(422, f"Portal {platform} is disabled for new crawls")
         capability = installed.get(platform)
         if not capability or capability.get("status") not in {"available", "experimental"}:
             raise HTTPException(
