@@ -57,6 +57,20 @@ def publish(engine, coverage_start=COVERAGE):
         return _publish(conn, coverage_start)
 
 
+def test_cli_accepts_explicit_env_coverage_and_flag_overrides_it(monkeypatch):
+    from app.crawler import stats
+
+    calls = []
+    monkeypatch.setenv("CRAWLER_STATS_COVERAGE_START", "2026-10-01")
+    monkeypatch.setattr(
+        stats, "refresh", lambda engine, *, coverage_start: calls.append(coverage_start)
+    )
+    assert stats.main(["--once"]) == 0
+    assert calls == [date(2026, 10, 1)]
+    assert stats.main(["--coverage-start", "2026-10-02", "--once"]) == 0
+    assert calls[-1] == date(2026, 10, 2)
+
+
 def test_backfill_wib_owner_isolation_and_multi_platform_counts(stats_engine):
     a, b = owner(stats_engine), owner(stats_engine)
     run(

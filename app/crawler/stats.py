@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import threading
 from datetime import date
 
@@ -18,8 +19,9 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--coverage-start",
         type=date.fromisoformat,
-        required=True,
-        help="First WIB day with verified complete, retained source history",
+        default=os.environ.get("CRAWLER_STATS_COVERAGE_START") or None,
+        required=not bool(os.environ.get("CRAWLER_STATS_COVERAGE_START")),
+        help="First WIB day with retained source history (or CRAWLER_STATS_COVERAGE_START)",
     )
     parser.add_argument("--once", action="store_true", help="Backfill/refresh once and exit")
     parser.add_argument("--interval-seconds", type=int, default=300)

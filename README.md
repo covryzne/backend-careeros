@@ -174,3 +174,49 @@ adapters. New requests for disabled portals return 422. Existing runs, idempoten
 results and portal history remain accessible. Enabling `indeed` later does not configure
 Chrome profiles or guarantee portal access. This policy does not remove CLI adapters and
 does not require a frontend env variable or database migration.
+
+### Staging crawler statistics producer
+
+Crawler statistics are published by `app.crawler.stats`, separately from Selenium.
+A running crawler worker does not publish analytics. Users created after the last
+publication receive `CRAWLER_STATS_NOT_READY` until the next successful refresh;
+existing job rows are unaffected. Statistics measure run outcomes, not current
+saved/new/archived job collection size.
+
+Staging Compose provides an opt-in `analytics` profile using the existing backend
+image. In the backend `.env.staging`, set `CRAWLER_STATS_COVERAGE_START` to the
+**existing publication coverage_start**. Do not change this boundary for an
+existing publication. If there is no publication, explicitly select the start of
+retained source history before initializing. Inspect these read-only queries on
+the intended staging database first:
+
+```sql
+SELECT DISTINCT coverage_start, definition_version FROM crawler_stats_publications;
+SELECT MIN((started_at AT TIME ZONE 'Asia/Jakarta')::date) AS first_retained_day
+FROM crawl_runs WHERE started_at IS NOT NULL;
+```
+
+From the backend repository on the VM, after setting the coverage date:
+
+```bash
+docker compose -f compose.staging.yml --profile analytics up -d --build backend crawler-stats
+docker compose -f compose.staging.yml logs --tail=50 crawler-stats
+```
+
+The service publishes immediately and every 300 seconds. Expect a `Published batch`
+log with owner/bucket counts; then reload dashboard statistics. Browser refresh
+alone cannot create a publication. Missing/invalid coverage prevents startup;
+database errors retain the last publication and retry. A Compose profile does not
+start with plain `up` unless explicitly enabled. Keep using `--profile analytics`
+(or Compose's environment profile selection) when managing that service. Rollback:
+stop `crawler-stats`; published data remains and becomes marked stale. No schema
+migration or crawler scheduling change is introduced by this deployment wiring.
+
+### Account consistency across tabs
+
+`X-CareerOS-Account` is an optional UUID consistency header. The backend derives the
+owner exclusively from the verified token; a different expected account returns
+409 `ACCOUNT_SESSION_CHANGED` before reading or mutating user resources. The
+header cannot select another owner or bypass authentication. Clients without it
+retain the existing contract. The dashboard sends it after verifying its session
+so an old tab cannot silently submit an account-A form using account-B cookies.
