@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jwt.exceptions import PyJWKClientConnectionError
+from sqlalchemy import select
 
 from app.core import security
 from app.core.config import Settings, settings
@@ -63,6 +64,7 @@ def signer(request, monkeypatch):
             "iss": settings.auth_endpoints()[0],
             "aud": "authenticated",
             "role": "authenticated",
+            "session_id": str(uuid.uuid4()),
             "iat": now,
             "exp": now + timedelta(minutes=5),
         }
@@ -104,6 +106,8 @@ def test_authenticated_owners_are_isolated(jobs_client, staging, signer):
     first, second = uuid.uuid4(), uuid.uuid4()
     first_headers = {"Authorization": f"Bearer {signer(first)}"}
     second_headers = {"Authorization": f"Bearer {signer(second)}"}
+    assert client.post("/api/v1/auth-sessions", headers=first_headers, json={}).status_code == 200
+    assert client.post("/api/v1/auth-sessions", headers=second_headers, json={}).status_code == 200
     created = client.patch("/api/v1/profile", headers=first_headers, json={"full_name": "First"})
     assert created.status_code == 200, created.text
     assert db.get(User, first) is not None
@@ -126,6 +130,8 @@ def test_stale_tab_account_cannot_read_or_write_as_the_new_cookie_owner(
     first, second = uuid.uuid4(), uuid.uuid4()
     a = {"Authorization": f"Bearer {signer(first)}", "X-CareerOS-Account": str(first)}
     b = {"Authorization": f"Bearer {signer(second)}", "X-CareerOS-Account": str(second)}
+    assert client.post("/api/v1/auth-sessions", headers=a, json={}).status_code == 200
+    assert client.post("/api/v1/auth-sessions", headers=b, json={}).status_code == 200
     assert (
         client.patch("/api/v1/profile", headers=a, json={"full_name": "Account A"}).status_code
         == 200
@@ -230,3 +236,63 @@ def test_seeding_production_is_disabled(staging, monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
     with pytest.raises(SystemExit):
         seed_actor(Namespace(owner_id=uuid.uuid4(), confirm_staging=True))
+
+
+def test_takeover_revokes_old_session_and_refresh_cannot_extend_lease(jobs_client, staging, signer):
+    from app.models.auth_session import AuthSession
+    from app.services.auth_sessions import utc
+
+    client, db = jobs_client
+    owner, session_id = uuid.uuid4(), str(uuid.uuid4())
+    first = {"Authorization": f"Bearer {signer(owner, session_id=session_id)}"}
+    second = {"Authorization": f"Bearer {signer(owner)}"}
+    # A signed JWT alone cannot bypass the server-side login lease.
+    assert client.get("/api/v1/jobs", headers=first).status_code == 401
+    claimed = client.post("/api/v1/auth-sessions", headers=first, json={})
+    assert claimed.status_code == 200
+    assert claimed.json()["expires_in"] == 21600
+    expires_at = claimed.json()["expires_at"]
+    row = db.scalar(select(AuthSession))
+    assert (utc(row.expires_at) - utc(row.created_at)).total_seconds() == 21600
+    denied = client.post("/api/v1/auth-sessions", headers=second, json={})
+    assert denied.status_code == 409
+    assert denied.json()["error"]["code"] == "SESSION_ACTIVE_ELSEWHERE"
+    assert client.get("/api/v1/jobs", headers=first).status_code == 200
+    refreshed = {"Authorization": f"Bearer {signer(owner, session_id=session_id)}"}
+    resumed = client.post("/api/v1/auth-sessions", headers=refreshed, json={})
+    assert resumed.json()["expires_at"] == expires_at
+    assert client.post("/api/v1/auth-sessions", headers=second, json={"takeover": True}).status_code == 200
+    for headers in (first, refreshed):
+        result = client.get("/api/v1/jobs", headers=headers)
+        assert result.status_code == 401
+        assert result.json()["error"]["code"] == "SESSION_REPLACED"
+        assert client.post("/api/v1/auth-sessions", headers=headers, json={"takeover": True}).status_code == 401
+    assert client.delete("/api/v1/auth-sessions/current", headers=first).status_code == 204
+    assert client.get("/api/v1/jobs", headers=second).status_code == 200
+
+
+def test_absolute_expiry_requires_a_new_provider_session(jobs_client, staging, signer):
+    from app.models.auth_session import AuthSession
+
+    client, db = jobs_client
+    owner, session_id = uuid.uuid4(), str(uuid.uuid4())
+    first = {"Authorization": f"Bearer {signer(owner, session_id=session_id)}"}
+    assert client.post("/api/v1/auth-sessions", headers=first, json={}).status_code == 200
+    row = db.scalar(select(AuthSession))
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db.commit()
+    refreshed = {"Authorization": f"Bearer {signer(owner, session_id=session_id)}"}
+    expired = client.get("/api/v1/auth-sessions/current", headers=refreshed)
+    assert expired.status_code == 401
+    assert expired.json()["error"]["code"] == "SESSION_EXPIRED"
+    assert client.post("/api/v1/auth-sessions", headers=refreshed, json={"takeover": True}).status_code == 401
+    fresh = {"Authorization": f"Bearer {signer(owner)}"}
+    assert client.post("/api/v1/auth-sessions", headers=fresh, json={}).status_code == 200
+    assert client.post("/api/v1/auth-sessions", headers=fresh, json={"takeover": "false"}).status_code == 422
+
+
+@pytest.mark.parametrize("session_id", [None, "invalid", 123])
+def test_missing_or_invalid_provider_session_is_rejected(jobs_client, staging, signer, session_id):
+    client, _ = jobs_client
+    headers = {"Authorization": f"Bearer {signer(session_id=session_id)}"}
+    assert client.post("/api/v1/auth-sessions", headers=headers, json={}).status_code == 401
