@@ -51,6 +51,7 @@ def test_api_verifies_http_jwks_and_fails_closed_on_outage(jobs_client, monkeypa
         "iss": issuer,
         "aud": "authenticated",
         "role": "authenticated",
+        "session_id": str(uuid.uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=5),
     }
@@ -58,6 +59,7 @@ def test_api_verifies_http_jwks_and_fails_closed_on_outage(jobs_client, monkeypa
     headers = {"Authorization": f"Bearer {token}"}
     jwks_client.cache_clear()
     try:
+        assert client.post("/api/v1/auth-sessions", headers=headers, json={}).status_code == 200
         result = client.patch(
             "/api/v1/profile", headers=headers, json={"full_name": "HTTP fixture"}
         )

@@ -1,4 +1,5 @@
 from app.models import (
+    auth_session,  # noqa: F401 - server-side login session metadata
     crawler,  # noqa: F401 - register crawler metadata
     crawler_stats,  # noqa: F401 - register analytics metadata
     local_auth,  # noqa: F401 - local account metadata

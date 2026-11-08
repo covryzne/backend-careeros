@@ -8,9 +8,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models.local_auth import LocalAccount, LocalSession
-
-SESSION_SECONDS = 8 * 60 * 60
+from app.models.local_auth import LocalAccount
+from app.services import auth_sessions
 
 
 def require_local_auth():
@@ -47,26 +46,22 @@ def account_for_token(db, token):
     require_local_auth()
     if not isinstance(token, str) or not token.startswith("dev_") or len(token) > 128:
         raise HTTPException(401, "Sesi tidak valid. Silakan masuk kembali.")
-    row = db.get(LocalSession, token_hash(token))
-    if row is None or utc(row.expires_at) <= datetime.now(UTC):
-        raise HTTPException(401, "Sesi berakhir. Silakan masuk kembali.")
+    row = auth_sessions.validate(db, token_hash(token))
     account = db.get(LocalAccount, row.user_id)
     if account is None:
         raise HTTPException(401, "Sesi tidak valid.")
     return account
 
 
-def issue_session(db, account):
+def issue_session(db, account, *, takeover=False):
     token = "dev_" + secrets.token_urlsafe(32)
-    db.add(LocalSession(token_hash=token_hash(token), user_id=account.user_id,
-                        expires_at=datetime.now(UTC) + timedelta(seconds=SESSION_SECONDS)))
-    db.commit()
-    return {"token": token, "expires_in": SESSION_SECONDS,
+    lifetime = auth_sessions.claim(db, account.user_id, token_hash(token), takeover=takeover)
+    return {"token": token, **lifetime,
             "user": {"id": str(account.user_id), "name": account.name, "email": account.email}}
 
 
-def login(db, email, password):
-    account = db.scalar(select(LocalAccount).where(LocalAccount.email == email))
+def login(db, email, password, *, takeover=False):
+    account = db.scalar(select(LocalAccount).where(LocalAccount.email == email).with_for_update())
     if account and account.locked_until and utc(account.locked_until) > datetime.now(UTC):
         raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi dalam 5 menit.")
     # Still perform the expensive hash for unknown emails.
@@ -81,7 +76,7 @@ def login(db, email, password):
         raise HTTPException(401, "Email atau password tidak sesuai.")
     account.failed_attempts = 0
     account.locked_until = None
-    return issue_session(db, account)
+    return issue_session(db, account, takeover=takeover)
 
 
 def new_user_id():

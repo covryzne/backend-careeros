@@ -31,7 +31,7 @@ def unauthorized() -> HTTPException:
     )
 
 
-def verified_owner(token: str) -> uuid.UUID:
+def verified_claims(token: str) -> dict:
     try:
         issuer, url = settings.auth_endpoints()
     except ValueError:
@@ -61,11 +61,15 @@ def verified_owner(token: str) -> uuid.UUID:
         owner = uuid.UUID(claims["sub"])
         if owner.int == 0 or owner == LOCAL_OWNER_ID:
             raise unauthorized()
-        return owner
+        return claims
     except (PyJWKClientConnectionError, PyJWKSetError, OSError):
         raise HTTPException(503, "Authentication key service is unavailable") from None
     except (jwt.PyJWTError, ValueError, TypeError, KeyError):
         raise unauthorized() from None
+
+
+def verified_owner(token: str) -> uuid.UUID:
+    return uuid.UUID(verified_claims(token)["sub"])
 
 
 @dataclass(frozen=True)
@@ -135,4 +139,9 @@ def get_actor(
         if settings.app_env in {"development", "test"} and settings.allow_local_identity:
             return account(LOCAL_OWNER_ID)
         raise unauthorized()
-    return account(verified_owner(credentials.credentials))
+    from app.services.auth_sessions import supabase_key, validate
+
+    claims = verified_claims(credentials.credentials)
+    owner = uuid.UUID(claims["sub"])
+    validate(db, supabase_key(claims), owner)
+    return account(owner)

@@ -32,3 +32,7 @@ api_router.include_router(crawler_router, prefix="/crawler", tags=["crawler"])
 from app.api.routes.local_auth import router as local_auth_router
 
 api_router.include_router(local_auth_router, prefix="/local-auth", tags=["local-auth"])
+
+from app.api.routes.auth_sessions import router as auth_sessions_router
+
+api_router.include_router(auth_sessions_router, prefix="/auth-sessions", tags=["auth-sessions"])
