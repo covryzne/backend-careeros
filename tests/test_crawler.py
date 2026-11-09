@@ -52,7 +52,7 @@ def test_manual_202_replay_conflict_and_snapshot(crawler):
         create(client, max_pages=5, days=7, max_jobs_per_platform=50).json()["run_id"]
         == run["run_id"]
     )
-    assert create(client, key="two").status_code == 409
+    assert create(client, key="two").json()["run_id"] == run["run_id"]
     assert create(client, days=14).status_code == 409
     assert db.scalar(select(func.count()).select_from(CrawlRun)) == 1
     assert client.get("/api/v1/crawler/runs").json()["total"] == 1
@@ -224,7 +224,7 @@ def test_stale_lease_is_not_reclaimed_and_fencing_rejects_writes(crawler):
     with pytest.raises(RuntimeError, match="ownership/lease"):
         service.heartbeat(db, run_id, "first", token, 30)
     db.rollback()
-    assert create(client, key="new").status_code == 409
+    assert create(client, key="new").json()["run_id"] == str(run_id)
 
 
 def test_worker_waiting_notice_distinguishes_idle_running_and_expired(crawler):

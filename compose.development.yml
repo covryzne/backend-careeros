@@ -37,5 +37,33 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  crawler-dispatcher:
+    profiles: [scheduler]
+    build:
+      context: .
+    image: careeros-backend:development-${IMAGE_TAG:-local}
+    command: ["python", "-m", "app.crawler.dispatcher"]
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: ${APP_ENV_FILE:-.env.development}
+        format: raw
+    environment:
+      APP_ENV: development
+      ALLOW_LOCAL_IDENTITY: "false"
+      AGENT_RUNTIME_ALLOWED: "false"
+      AGENT_WORKER_EMBEDDED: "false"
+      AGENT_ENABLED: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   documents:

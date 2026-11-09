@@ -209,6 +209,21 @@ def test_jwks_unavailable_has_sanitized_503(staging, signer, monkeypatch):
     assert "sensitive" not in caught.value.detail
 
 
+def test_token_rejection_logs_distinguish_cause_without_leaking_claims(staging, signer, caplog):
+    token = signer(iss="https://private-project.example/auth/v1")
+    with pytest.raises(HTTPException) as caught:
+        security.verified_owner(token)
+    assert caught.value.status_code == 401
+    assert "reason=InvalidIssuerError" in caplog.text
+    assert token not in caplog.text and "private-project.example" not in caplog.text
+    caplog.clear()
+    token = jwt.encode({"sub": "private-user-marker"}, "synthetic-test-secret-long-enough-for-hs256", algorithm="HS256")
+    with pytest.raises(HTTPException):
+        security.verified_owner(token)
+    assert "reason=legacy_hs256" in caplog.text
+    assert token not in caplog.text and "private-user-marker" not in caplog.text
+
+
 def test_supplied_bad_token_never_falls_back_to_local(jobs_client):
     client, _ = jobs_client
     assert client.get(

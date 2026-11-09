@@ -73,6 +73,10 @@ class RunRead(BaseModel):
     jobs_filtered: int
     jobs_date_unknown: int
     sources: list[SourceRead]
+    attempt_no: int = 1
+    retryable_platforms: list[str] = []
+    schedule_id: UUID | None = None
+    scheduled_for: datetime | None = None
 
 
 class RunPage(BaseModel):
@@ -98,6 +102,36 @@ class CapabilitiesRead(BaseModel):
     active: bool
     active_run_id: UUID | None
     limits: dict[str, int]
+    running_count: int = 0
+    queued_count: int = 0
+    execution_capacity: int = 1
+    scheduler_online: bool = False
+
+
+class ScheduleSave(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    config: CrawlCreate
+    hours: list[int] = Field(min_length=1, max_length=2)
+    enabled: bool
+    expected_version: int = Field(ge=0)
+
+    @field_validator("hours")
+    @classmethod
+    def valid_hours(cls, values):
+        if len(set(values)) != len(values) or any(value not in {5, 17} for value in values):
+            raise ValueError("Choose 05:00 and/or 17:00 WIB")
+        return sorted(values)
+
+
+class ScheduleRead(BaseModel):
+    id: UUID
+    config: dict
+    hours: list[int]
+    enabled: bool
+    version: int
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    updated_at: datetime
 
 
 class ItemRead(BaseModel):

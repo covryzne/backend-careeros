@@ -37,6 +37,9 @@ async def execute(run_id, token, worker_id, *, factory=SessionLocal, engine_fact
     with factory() as db:
         run = db.get(CrawlRun, run_id)
         config, owner_id = dict(run.config), run.owner_id
+        current_attempt = service.attempt(db, run)
+        platforms = list(current_attempt.platforms) if current_attempt else config["platforms"]
+        attempt_no = run.attempt_no
     failure = None
     clean = True
     started = time.monotonic()
@@ -52,7 +55,7 @@ async def execute(run_id, token, worker_id, *, factory=SessionLocal, engine_fact
             )
 
     async def crawl():
-        for platform in config["platforms"]:
+        for platform in platforms:
             for index, keyword in enumerate(config["keywords"]):
                 with factory() as db:
                     source = db.scalar(
@@ -60,15 +63,21 @@ async def execute(run_id, token, worker_id, *, factory=SessionLocal, engine_fact
                             CrawlRunSource.run_id == run_id, CrawlRunSource.platform == platform
                         )
                     )
-                    remaining = config["max_jobs_per_platform"] - source.jobs_found
-                    seen = [
-                        f"{platform}:{r.external_id}"
-                        for r in db.scalars(
+                    items = list(
+                        db.scalars(
                             select(CrawlRunItem).where(
                                 CrawlRunItem.run_id == run_id, CrawlRunItem.platform == platform
                             )
                         )
+                    )
+                    seen = [
+                        f"{platform}:{r.external_id}"
+                        for r in items
+                        if r.status in {"new", "duplicate", "filtered_date", "date_unknown"}
                     ]
+                    remaining = config["max_jobs_per_platform"] - len(seen)
+                    known = [f"{platform}:{r.external_id}" for r in items]
+                    new_budget = config["max_jobs_per_platform"] - source.jobs_found
                     if remaining <= 0 or source.error:
                         break
                 browser = {"auto": None, "headed": False, "headless": True}[
@@ -100,11 +109,14 @@ async def execute(run_id, token, worker_id, *, factory=SessionLocal, engine_fact
                         {
                             "request": request,
                             "seen_ids": seen,
+                            "known_ids": known,
+                            "new_job_budget": new_budget,
                             "output_dir": str(
                                 settings.crawler_root
                                 / "output"
                                 / "service-runs"
                                 / str(run_id)
+                                / f"attempt-{attempt_no}"
                                 / platform
                                 / str(index)
                             ),
@@ -208,8 +220,9 @@ def recover(run_id):
     """Only after supervisor/operator cleanup; never timeout-steal a browser slot."""
 
     def action(db):
-        state = service.slot(db)
+        service.slot(db)
         run = db.get(CrawlRun, run_id)
+        state = service.slot(db, run.execution_slot) if run else None
         if not run or state.active_run_id != run_id or run.status != "running":
             raise RuntimeError("Run is not an interrupted active execution")
         host, pid, _ = (run.worker_id or "").split("|")
@@ -246,6 +259,9 @@ async def main(once=False):
     )
     log.info("Starting crawler worker; checking installed Selenium adapters...")
     capabilities = probe()  # Discover the installed Selenium engine, not UI constants.
+    transaction(
+        SessionLocal, lambda db: service.configure_slots(db, settings.crawler_max_concurrency)
+    )
     worker_id = f"{socket.gethostname()[:60]}|{os.getpid()}|{uuid.uuid4().hex[:12]}"
     log.info("Worker %s ready. Start a manual run from the Crawler dashboard.", worker_id)
     last_notice = None

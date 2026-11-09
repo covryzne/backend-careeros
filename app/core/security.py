@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -15,6 +17,7 @@ from app.db.session import get_db
 LOCAL_OWNER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _APPROVAL_CAPABILITY = object()
 bearer = HTTPBearer(auto_error=False)
+log = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=8)
@@ -31,6 +34,13 @@ def unauthorized() -> HTTPException:
     )
 
 
+def token_rejected(reason: str) -> HTTPException:
+    # Only fixed reason labels and a project fingerprint: never JWTs or claims.
+    project = hashlib.sha256((settings.supabase_url or "").rstrip("/").encode()).hexdigest()[:10]
+    log.warning("Supabase token rejected: reason=%s project=%s", reason, project)
+    return unauthorized()
+
+
 def verified_claims(token: str) -> dict:
     try:
         issuer, url = settings.auth_endpoints()
@@ -38,16 +48,19 @@ def verified_claims(token: str) -> dict:
         raise HTTPException(503, "Authentication is not configured") from None
     try:
         if len(token) > 8192:
-            raise unauthorized()
+            raise token_rejected("token_too_large")
         header = jwt.get_unverified_header(token)
         # Never select algorithms or network endpoints from untrusted token claims.
-        if header.get("alg") not in {"ES256", "RS256"} or not header.get("kid"):
-            raise unauthorized()
+        if header.get("alg") not in {"ES256", "RS256"}:
+            reason = "legacy_hs256" if header.get("alg") == "HS256" else "unsupported_algorithm"
+            raise token_rejected(reason)
+        if not header.get("kid"):
+            raise token_rejected("missing_key_id")
         key = jwks_client(
             url, settings.auth_jwks_timeout_seconds, settings.auth_jwks_cache_seconds
         ).get_signing_key_from_jwt(token)
         if key.algorithm_name != header["alg"]:
-            raise unauthorized()
+            raise token_rejected("key_algorithm_mismatch")
         claims = jwt.decode(
             token,
             key.key,
@@ -57,15 +70,15 @@ def verified_claims(token: str) -> dict:
             options={"require": ["exp", "iat", "iss", "aud", "sub", "role"]},
         )
         if claims["role"] != "authenticated":
-            raise unauthorized()
+            raise token_rejected("unexpected_role")
         owner = uuid.UUID(claims["sub"])
         if owner.int == 0 or owner == LOCAL_OWNER_ID:
-            raise unauthorized()
+            raise token_rejected("invalid_owner")
         return claims
     except (PyJWKClientConnectionError, PyJWKSetError, OSError):
         raise HTTPException(503, "Authentication key service is unavailable") from None
-    except (jwt.PyJWTError, ValueError, TypeError, KeyError):
-        raise unauthorized() from None
+    except (jwt.PyJWTError, ValueError, TypeError, KeyError) as exc:
+        raise token_rejected(type(exc).__name__) from None
 
 
 def verified_owner(token: str) -> uuid.UUID:

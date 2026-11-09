@@ -236,9 +236,10 @@ def apply_event(db, run, platform, keyword, event):
         )
         if item is None:
             raise RuntimeError("Detail event without a discovered card")
-        if kind == "detail_started" and not item.provenance.get("attempted"):
-            source.detail_attempts += 1
-            item.provenance = {**item.provenance, "attempted": True}
+        if kind == "detail_started":
+            if not item.provenance.get("attempted"):
+                source.detail_attempts += 1
+                item.provenance = {**item.provenance, "attempted": True}
             label = item.title or f"ID {external}"
             append_event(db, run, f"Mengambil detail: {label[:240]}.", platform=platform)
         elif kind == "detail_error":
