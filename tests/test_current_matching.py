@@ -1,11 +1,14 @@
 import uuid
 
+import pytest
 from sqlalchemy import func, select
 
 from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.workflow import JobMatch, JobSkill
-from app.services.matching import ALGORITHM
+from app.services.jobs.matching import ALGORITHM
+
+pytestmark = pytest.mark.usefixtures("enabled_job_matching")
 
 
 def profile(client):

@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.schemas.workflow import ReminderCreate, ReminderPatch
-from app.services import reminders
-from app.services.idempotency import command
+from app.services.reminders import service as reminders
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 

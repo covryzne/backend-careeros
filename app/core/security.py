@@ -1,12 +1,88 @@
+import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import Annotated
 
-from fastapi import HTTPException
+import jwt
+from fastapi import Depends, Header, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKSetError
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.session import get_db
 
 LOCAL_OWNER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _APPROVAL_CAPABILITY = object()
+bearer = HTTPBearer(auto_error=False)
+log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=8)
+def jwks_client(url: str, timeout: float, lifespan: int) -> jwt.PyJWKClient:
+    # Cache the set with a TTL, not individual keys indefinitely (key rotation).
+    return jwt.PyJWKClient(url, timeout=timeout, lifespan=lifespan, cache_keys=False)
+
+
+def unauthorized() -> HTTPException:
+    return HTTPException(
+        401,
+        "A valid Supabase user access token is required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def token_rejected(reason: str) -> HTTPException:
+    # Only fixed reason labels and a project fingerprint: never JWTs or claims.
+    project = hashlib.sha256((settings.supabase_url or "").rstrip("/").encode()).hexdigest()[:10]
+    log.warning("Supabase token rejected: reason=%s project=%s", reason, project)
+    return unauthorized()
+
+
+def verified_claims(token: str) -> dict:
+    try:
+        issuer, url = settings.auth_endpoints()
+    except ValueError:
+        raise HTTPException(503, "Authentication is not configured") from None
+    try:
+        if len(token) > 8192:
+            raise token_rejected("token_too_large")
+        header = jwt.get_unverified_header(token)
+        # Never select algorithms or network endpoints from untrusted token claims.
+        if header.get("alg") not in {"ES256", "RS256"}:
+            reason = "legacy_hs256" if header.get("alg") == "HS256" else "unsupported_algorithm"
+            raise token_rejected(reason)
+        if not header.get("kid"):
+            raise token_rejected("missing_key_id")
+        key = jwks_client(
+            url, settings.auth_jwks_timeout_seconds, settings.auth_jwks_cache_seconds
+        ).get_signing_key_from_jwt(token)
+        if key.algorithm_name != header["alg"]:
+            raise token_rejected("key_algorithm_mismatch")
+        claims = jwt.decode(
+            token,
+            key.key,
+            algorithms=[key.algorithm_name],
+            issuer=issuer,
+            audience=settings.supabase_jwt_audience,
+            options={"require": ["exp", "iat", "iss", "aud", "sub", "role"]},
+        )
+        if claims["role"] != "authenticated":
+            raise token_rejected("unexpected_role")
+        owner = uuid.UUID(claims["sub"])
+        if owner.int == 0 or owner == LOCAL_OWNER_ID:
+            raise token_rejected("invalid_owner")
+        return claims
+    except (PyJWKClientConnectionError, PyJWKSetError, OSError):
+        raise HTTPException(503, "Authentication key service is unavailable") from None
+    except (jwt.PyJWTError, ValueError, TypeError, KeyError) as exc:
+        raise token_rejected(type(exc).__name__) from None
+
+
+def verified_owner(token: str) -> uuid.UUID:
+    return uuid.UUID(verified_claims(token)["sub"])
 
 
 @dataclass(frozen=True)
@@ -48,7 +124,37 @@ class ActorContext:
             raise HTTPException(403, "APPROVAL_REQUIRED")
 
 
-def get_actor() -> ActorContext:
-    if settings.app_env not in {"development", "test"} or not settings.allow_local_identity:
-        raise HTTPException(401, "Authentication required; local identity is development-only")
-    return ActorContext(LOCAL_OWNER_ID)
+def get_actor(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+    expected_account_id: Annotated[uuid.UUID | None, Header(alias="X-CareerOS-Account")] = None,
+) -> ActorContext:
+    def account(owner_id: uuid.UUID) -> ActorContext:
+        # Consistency guard only: the verified session remains the sole authority.
+        if expected_account_id is not None and expected_account_id != owner_id:
+            raise HTTPException(
+                409,
+                {
+                    "code": "ACCOUNT_SESSION_CHANGED",
+                    "message": "Akun sesi berubah. Muat ulang dashboard sebelum melanjutkan.",
+                },
+            )
+        return ActorContext(owner_id)
+
+    if settings.app_env == "development" and settings.local_auth_enabled:
+        from app.services.local_auth import account_for_token
+
+        if credentials is None:
+            raise unauthorized()
+        local_account = account_for_token(db, credentials.credentials)
+        return account(local_account.user_id)
+    if credentials is None:
+        if settings.app_env in {"development", "test"} and settings.allow_local_identity:
+            return account(LOCAL_OWNER_ID)
+        raise unauthorized()
+    from app.services.auth_sessions import supabase_key, validate
+
+    claims = verified_claims(credentials.credentials)
+    owner = uuid.UUID(claims["sub"])
+    validate(db, supabase_key(claims), owner)
+    return account(owner)

@@ -10,8 +10,8 @@ from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.foundation import CandidateDocument, CVImport
-from app.services.career import career_context, validate_report
-from app.services.cv_parser import parse_text
+from app.services.agent.career import career_context, validate_report
+from app.services.documents.parser import parse_text
 
 CV_TEXT = """Ayu Candidate
 Backend Engineer
@@ -115,7 +115,7 @@ def test_parser_extracts_actual_text_and_bilingual_fields():
     assert parse_text(indo)["fields"]["experiences"][0]["is_current"]
 
 
-def test_cv_import_creates_profile_atomically_and_matches_without_facts(jobs_client, storage):
+def test_cv_import_creates_profile_atomically_and_matches_without_facts(jobs_client, storage, enabled_job_matching):
     client, db = jobs_client
     record = stage(client)
     assert client.get("/api/v1/profile").status_code == 404
@@ -322,7 +322,7 @@ def test_large_text_pdf_upload_uses_document_body_limit(jobs_client, storage):
 def test_page_limit_and_timeout_are_clear_and_leave_no_profile(jobs_client, storage, monkeypatch):
     import subprocess
 
-    from app.services import cv_imports
+    from app.services.documents import imports as cv_imports
 
     client, _ = jobs_client
     writer = PdfWriter()

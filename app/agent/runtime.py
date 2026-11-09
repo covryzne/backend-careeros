@@ -15,12 +15,12 @@ from app.core.security import ActorContext
 from app.db.session import SessionLocal
 from app.integrations.llm import LLMProvider, ProviderUnavailable
 from app.models.workflow import AgentRun, AgentToolEvent
-from app.services import profile
-from app.services.agent_facade import AgentServices
-from app.services.agent_privacy import private_values, sanitize_messages
-from app.services.agent_settings import policy_for
-from app.services.career import report_instruction, validate_report
-from app.services.idempotency import fingerprint, lock_owner
+from app.services.agent.career import report_instruction, validate_report
+from app.services.agent.facade import AgentServices
+from app.services.agent.privacy import private_values, sanitize_messages
+from app.services.agent.settings import policy_for
+from app.services.profile import service as profile
+from app.services.shared.idempotency import fingerprint, lock_owner
 
 
 def utc(value):
@@ -54,7 +54,7 @@ async def process_run(run_id, provider=None, session_factory=SessionLocal):
             if run is None or run.status != "running":
                 return
             if provider is None:
-                from app.services.provider_settings import config_for
+                from app.services.providers.settings import config_for
 
                 try:
                     config = config_for(db, run.owner_id)

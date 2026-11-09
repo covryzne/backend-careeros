@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import settings
 from app.core.security import LOCAL_OWNER_ID, ActorContext
 from app.db.session import SessionLocal
 from app.models.candidate import CandidateExperience, CandidateProject, CandidateSkill
@@ -25,8 +24,9 @@ from app.schemas.profile import (
     CandidateSkillUpdate,
     ProfileUpdate,
 )
-from app.services import profile
-from app.services.idempotency import lock_owner
+from app.services.profile import service as profile
+from app.services.shared.idempotency import lock_owner
+from scripts.seed_options import add_owner_options, check_staging_user, seed_actor
 
 PROFILE = {
     "full_name": "Shendi Teuku Maulana Efendi",
@@ -303,17 +303,18 @@ def seed(db, actor=None, *, overwrite=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_owner_options(parser)
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace populated seed-related profile fields; retain unrelated records.",
     )
     args = parser.parse_args()
-    if settings.app_env not in {"development", "test"}:
-        raise SystemExit("Seed profile hanya untuk database development/test.")
+    actor = seed_actor(args)
     try:
         with SessionLocal.begin() as db:
-            result = seed(db, overwrite=args.overwrite)
+            check_staging_user(db, actor)
+            result = seed(db, actor, overwrite=args.overwrite)
     except SQLAlchemyError:
         raise SystemExit(
             "Seed profile gagal. Periksa DATABASE_URL dan jalankan python -m alembic upgrade head."

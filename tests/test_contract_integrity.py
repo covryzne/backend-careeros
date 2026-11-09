@@ -185,7 +185,7 @@ def test_agent_scope_filters_before_pagination(jobs_client, monkeypatch):
     from app.agent.context import ToolContext
     from app.core.security import LOCAL_OWNER_ID, ActorContext
     from app.schemas.agent import SearchArguments
-    from app.services.agent_facade import AgentServices
+    from app.services.agent.facade import AgentServices
 
     client, db = jobs_client
     target = client.post("/api/v1/jobs", json={"title": "Allowed", "company": "Example"}).json()

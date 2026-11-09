@@ -7,7 +7,7 @@ from app.agent.runtime import process_run
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.workflow import AgentRun
-from app.services.agent_settings import policy_for
+from app.services.agent.settings import policy_for
 
 
 def claim_next(session_factory=SessionLocal):

@@ -53,7 +53,10 @@ def install(app):
 
     @app.exception_handler(HTTPException)
     async def http_error(request, exc):
-        return error_response(request, exc.status_code, exc.detail)
+        response = error_response(request, exc.status_code, exc.detail)
+        if exc.headers:
+            response.headers.update(exc.headers)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):

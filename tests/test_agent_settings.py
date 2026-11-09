@@ -15,7 +15,7 @@ from app.core.security import LOCAL_OWNER_ID, ActorContext, get_actor
 from app.main import app
 from app.models.foundation import AgentPreference
 from app.schemas.agent import SearchArguments
-from app.services.agent_facade import AgentServices
+from app.services.agent.facade import AgentServices
 
 
 def patch(client, version=0, **values):
@@ -108,8 +108,8 @@ def test_settings_retry_does_not_duplicate_version(jobs_client):
 
 
 def test_matching_uses_professional_profile_without_verified_facts_and_filters_pii(jobs_client):
-    from app.services.agent_privacy import sanitize_messages
-    from app.services.career import career_context, validate_report
+    from app.services.agent.career import career_context, validate_report
+    from app.services.agent.privacy import sanitize_messages
 
     client, db = jobs_client
     personal = {

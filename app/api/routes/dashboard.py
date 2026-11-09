@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
 from app.schemas.dashboard import DashboardResponse
-from app.services.dashboard import dashboard_summary
+from app.services.dashboard.service import dashboard_summary
 
 router = APIRouter()
 

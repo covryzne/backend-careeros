@@ -8,8 +8,8 @@ from app.models.candidate import CandidateFact, CandidateProfile, CandidateSkill
 from app.models.foundation import CandidateDocument
 from app.models.workflow import Application, Job, JobMatch, JobSkill
 from app.schemas.profile import ProfileUpdate
-from app.services import profile
-from app.services.career import career_context
+from app.services.agent.career import career_context
+from app.services.profile import service as profile
 from scripts.seed_jobs import ALGORITHM, JOBS
 from scripts.seed_jobs import seed as seed_jobs
 from scripts.seed_real_profile import EXPERIENCES, PROFILE, PROJECTS, SKILLS
@@ -141,7 +141,7 @@ def test_restore_seeded_jobs_preserves_id_application_and_active_status_changes(
     assert stored.job_id == deleted.id and stored.status == "applied"
 
 
-def test_demo_matches_use_current_profile_version_and_professional_sources(jobs_client):
+def test_demo_matches_use_current_profile_version_and_professional_sources(jobs_client, enabled_job_matching):
     _, db = jobs_client
     seed_profile(db)
     first = seed_jobs(db)

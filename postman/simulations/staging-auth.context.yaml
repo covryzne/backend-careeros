@@ -1,0 +1,37 @@
+purpose:
+  stands_in_for: Supabase Auth asymmetric JWKS HTTP discovery with synthetic public keys.
+  unblocks: Backend signature verification, owner isolation, and cold-cache key-service outage handling without real staging credentials.
+assumptions:
+  - id: jwks-contract
+    status: supported
+    claim: Supabase publishes asymmetric verification keys as a JSON Web Key Set at /auth/v1/.well-known/jwks.json.
+    reason: Backend obtains public keys from its configured project rather than trusting JWT-controlled URLs.
+    verification: Read Supabase JWT documentation and exercised synthetic EC keys through the local Postman member; no real project was contacted.
+    source: https://supabase.com/docs/guides/auth/jwts
+    updated_at: '2026-11-06'
+  - id: caller-http-roundtrip-and-outage
+    status: supported
+    claim: In the exercised scenarios, the real backend accepts a synthetic signed user token via HTTP-discovered JWKS and returns 503 on a cold-cache JWKS outage.
+    reason: Unit stubs alone would not demonstrate network fetching and real key parsing.
+    verification: tests/test_auth_simulation.py passed; simulation request log showed GET JWKS responses 200, 503, 200. API profile creation succeeded, outage request returned 503, and recovery read succeeded.
+    source: tests/test_auth_simulation.py
+    updated_at: '2026-11-06'
+  - id: live-project-interoperability
+    status: unknown
+    claim: Target Supabase project signing keys, real tokens, database role privileges and server TLS/networking match deployment configuration.
+    reason: No user secrets or live project were accessed; fixtures cannot establish provider/VM configuration.
+    verification: Pending target-server smoke test and real staging user token.
+    source: STAGING.md
+    updated_at: '2026-11-06'
+  - id: login-lease-with-http-jwks
+    status: supported
+    claim: In the exercised local HTTP scenario, a signed provider token with session_id must activate a server-side login lease before accessing protected resources; cached-key outage behavior remains unchanged.
+    reason: The actual FastAPI authentication and session activation ran against SQLite with real HTTP public-key discovery. This verifies the caller and synthetic signing keys, not live project configuration.
+    verification: On 2026-11-08 tests/test_auth_simulation.py passed after explicit lease activation; the simulation emitted JWKS 200, 503 and 200 for success, cold-cache outage and recovery. The backend suite passed 295 tests, with 16 optional integration tests skipped; the two new PostgreSQL concurrency tests passed separately in a disposable migrated database.
+    source: tests/test_auth_simulation.py; tests/test_staging_auth.py; tests/integration/test_auth_sessions_postgres.py
+    updated_at: '2026-11-08'
+fingerprints:
+  - id: local-staging-auth
+    date: '2026-11-06'
+    commit: staging working tree based on be4a6dae9b1814ac7e7d1c423d3a66902e58e942
+    cli: Postman CLI 1.76.0

@@ -3,8 +3,18 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .env
+.env.*
+.env.example
+.env.*.example
 *.py[cod]
 
+node_modules/
+.next/
+package.json
+package-lock.json
+npm-debug.log*
 
 .private-documents/
 .verification/
+readme/
+docs/

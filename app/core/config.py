@@ -1,5 +1,8 @@
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,9 +11,16 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    app_env: str = "development"
+    app_env: Literal["development", "test", "staging", "production"] = "development"
     allow_local_identity: bool = True
+    local_auth_enabled: bool = False
+    supabase_url: str | None = None
+    supabase_jwks_url: str | None = None
+    supabase_jwt_audience: str = "authenticated"
+    auth_jwks_timeout_seconds: float = Field(default=5, gt=0, le=30)
+    auth_jwks_cache_seconds: int = Field(default=300, ge=1, le=3600)
     require_profile_version: bool = False
+    job_matching_enabled: bool = False
     agent_runtime_allowed: bool = True
     agent_worker_embedded: bool = True
     agent_enabled: bool = False
@@ -26,6 +36,14 @@ class Settings(BaseSettings):
     document_storage_dir: Path = BACKEND_ROOT / ".private-documents"
     document_max_bytes: int = 10 * 1024 * 1024
     database_url: str
+    crawler_root: Path = BACKEND_ROOT.parent / "careeros-crawler"
+    crawler_python: Path | None = None
+    crawler_browser_mode: str = Field(default="auto", pattern="^(auto|headed|headless)$")
+    crawler_run_timeout_seconds: int = Field(default=3600, ge=60, le=14400)
+    crawler_lease_seconds: int = Field(default=30, ge=15, le=120)
+    crawler_max_concurrency: int = Field(default=1, ge=1, le=8)
+    # Deployment policy, separate from adapters installed/reported by the worker.
+    crawler_enabled_portals: str = "linkedin,jobstreet,glints,dealls,kalibrr,techinasia"
     api_v1_prefix: str = "/api/v1"
     allowed_origins: list[str] = ["http://localhost:3000"]
 
@@ -34,6 +52,62 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("crawler_enabled_portals")
+    @classmethod
+    def validate_crawler_portals(cls, value: str) -> str:
+        known = {"linkedin", "jobstreet", "glints", "indeed", "dealls", "kalibrr", "techinasia"}
+        portals = list(
+            dict.fromkeys(part.strip().lower() for part in value.split(",") if part.strip())
+        )
+        if set(portals) - known:
+            raise ValueError("CRAWLER_ENABLED_PORTALS contains unsupported portal names")
+        # An explicitly empty value disables all new dashboard/API crawls.
+        return ",".join(portals)
+
+    def enabled_crawler_portals(self) -> set[str]:
+        return set(filter(None, self.crawler_enabled_portals.split(",")))
+
+    def auth_endpoints(self) -> tuple[str, str]:
+        """Only deployment configuration chooses the trusted issuer and keys URL."""
+        base = (self.supabase_url or "").rstrip("/")
+        parsed = urlsplit(base)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("SUPABASE_URL must be an HTTPS project origin")
+        issuer = f"{base}/auth/v1"
+        jwks = f"{issuer}/.well-known/jwks.json"
+        if self.supabase_jwks_url and self.supabase_jwks_url != jwks:
+            raise ValueError("SUPABASE_JWKS_URL must match SUPABASE_URL's Auth JWKS endpoint")
+        if not self.supabase_jwt_audience.strip():
+            raise ValueError("SUPABASE_JWT_AUDIENCE is required")
+        return issuer, jwks
+
+    def validate_deployment(self) -> None:
+        if self.app_env in {"development", "test"}:
+            return
+        if self.local_auth_enabled:
+            raise ValueError("LOCAL_AUTH_ENABLED must be false outside development")
+        if self.allow_local_identity:
+            raise ValueError("ALLOW_LOCAL_IDENTITY must be false outside development/test")
+        self.auth_endpoints()
+        if not self.allowed_origins or "*" in self.allowed_origins:
+            raise ValueError("Explicit ALLOWED_ORIGINS are required for deployment")
+        from cryptography.fernet import Fernet
+
+        try:
+            if not self.provider_encryption_key:
+                raise ValueError()
+            Fernet(self.provider_encryption_key.get_secret_value().encode())
+        except (ValueError, TypeError):
+            raise ValueError("A valid stable PROVIDER_ENCRYPTION_KEY is required") from None
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -45,7 +119,18 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    selected = os.environ.get("APP_ENV_FILE")
+    if selected is None:
+        return Settings()
+    if not selected.strip():
+        raise ValueError("APP_ENV_FILE must name an existing env file")
+    path = Path(selected).expanduser()
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    if not path.is_file():
+        raise ValueError(f"APP_ENV_FILE does not exist: {path}")
+    # Pydantic keeps process environment ahead of the explicitly selected file.
+    return Settings(_env_file=path)
 
 
 settings = get_settings()

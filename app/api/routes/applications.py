@@ -14,8 +14,8 @@ from app.schemas.workflow import (
     ApplicationStatus,
     ApplicationUpdate,
 )
-from app.services import application_workflows as service
-from app.services.idempotency import command
+from app.services.applications import workflows as service
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 

@@ -1,12 +1,15 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.api.routes.profile import LOCAL_OWNER_ID
 from app.models.candidate import CandidateProfile
 from app.models.workflow import Application, Job, JobMatch, Reminder
-from app.services.dashboard import JAKARTA, utc_midnight
+from app.services.dashboard.service import JAKARTA, utc_midnight
+
+pytestmark = pytest.mark.usefixtures("enabled_job_matching")
 
 
 def add_job(db, *, status="saved", owner_id=LOCAL_OWNER_ID, deleted=False, discovered_at=None):

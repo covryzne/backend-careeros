@@ -41,3 +41,11 @@ def disable_embedded_worker_for_isolated_tests(monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "agent_worker_embedded", False)
+
+
+@pytest.fixture
+def enabled_job_matching(monkeypatch):
+    """Exercise the retained engine explicitly; production defaults to coming soon."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "job_matching_enabled", True)

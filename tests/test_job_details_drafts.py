@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.core.security import ActorContext, get_actor
 from app.main import app
 from app.models.foundation import Draft, DraftVersion
-from app.services.job_content import details
+from app.services.jobs.content import details
 
 
 def job(client, **values):

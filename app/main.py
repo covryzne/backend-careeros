@@ -6,6 +6,19 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+if __name__ == "__main__":
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Run the local CareerOS API")
+    parser.add_argument(
+        "--env-file", help="Env file path, relative to the backend repo or absolute"
+    )
+    args = parser.parse_args()
+    if args.env_file:
+        # Choose configuration before any application modules construct Settings.
+        os.environ["APP_ENV_FILE"] = args.env_file
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,10 +31,7 @@ from app.db.session import database_health
 
 @asynccontextmanager
 async def lifespan(_app):
-    if settings.app_env not in {"development", "test"}:
-        raise RuntimeError(
-            "Production authentication is not configured; local identity cannot be used for deployment"
-        )
+    settings.validate_deployment()
     task = None
     if (
         settings.app_env == "development"

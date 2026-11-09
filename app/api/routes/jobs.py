@@ -16,8 +16,8 @@ from app.schemas.workflow import (
     JobSummary,
     JobUpdate,
 )
-from app.services import job_workflows as service
-from app.services.idempotency import command
+from app.services.jobs import workflows as service
+from app.services.shared.idempotency import command
 
 router = APIRouter()
 
