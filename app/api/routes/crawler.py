@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.core.security import ActorContext, get_actor
 from app.db.session import get_db
-from app.models.crawler import CrawlRunEvent, CrawlRunItem
+from app.models.crawler import (
+    CrawlRunAttempt,
+    CrawlRunEvent,
+    CrawlRunItem,
+    CrawlSchedule,
+    CrawlScheduleOccurrence,
+)
 from app.schemas.crawler import (
     CapabilitiesRead,
     CrawlCreate,
@@ -16,13 +22,92 @@ from app.schemas.crawler import (
     ItemPage,
     RunPage,
     RunRead,
+    ScheduleRead,
+    ScheduleSave,
     SourceRead,
 )
 from app.schemas.crawler_stats import CrawlerStatsResponse
 from app.services.crawler import runs as service
+from app.services.crawler import schedules
 from app.services.crawler.stats_read import read_stats
 
 router = APIRouter()
+
+
+@router.get("/schedule", response_model=ScheduleRead | None)
+def get_schedule(db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    return schedules.read(db, actor)
+
+
+@router.put("/schedule", response_model=ScheduleRead)
+def save_schedule(
+    payload: ScheduleSave, db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)
+):
+    result = schedules.save(db, actor, payload)
+    db.commit()
+    return result
+
+
+@router.get("/schedule/occurrences")
+def occurrences(db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    actor.require("jobs:read")
+    rows = db.scalars(
+        select(CrawlScheduleOccurrence)
+        .join(CrawlSchedule, CrawlSchedule.id == CrawlScheduleOccurrence.schedule_id)
+        .where(CrawlSchedule.owner_id == actor.owner_id)
+        .order_by(CrawlScheduleOccurrence.scheduled_for.desc())
+        .limit(20)
+    ).all()
+    return [
+        {
+            name: getattr(row, name)
+            for name in ("scheduled_for", "status", "reason", "run_id", "schedule_version")
+        }
+        for row in rows
+    ]
+
+
+@router.post("/runs/{run_id}/retry", response_model=RunRead, status_code=202)
+def retry_run(
+    run_id: uuid.UUID,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=200),
+    db: Session = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    run = service.retry(db, actor, run_id, idempotency_key)
+    result = service.run_data(db, run)
+    db.commit()
+    return result
+
+
+@router.get("/runs/{run_id}/attempts")
+def attempts(
+    run_id: uuid.UUID, db: Session = Depends(get_db), actor: ActorContext = Depends(get_actor)
+):
+    service.owned(db, actor, run_id)
+    rows = db.scalars(
+        select(CrawlRunAttempt)
+        .where(CrawlRunAttempt.run_id == run_id)
+        .order_by(CrawlRunAttempt.number)
+    ).all()
+    return [
+        {
+            name: getattr(row, name)
+            for name in (
+                "number",
+                "kind",
+                "platforms",
+                "status",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "error",
+                "sources_before",
+                "sources_after",
+            )
+        }
+        for row in rows
+    ]
 
 
 @router.get("/stats", response_model=CrawlerStatsResponse)

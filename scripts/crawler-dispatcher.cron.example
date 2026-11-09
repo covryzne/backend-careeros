@@ -1,0 +1,5 @@
+# Example only: replace absolute paths and install through your process supervisor.
+# ONE shared dispatcher, every minute. Times for each user are stored in PostgreSQL
+# and interpreted in Asia/Jakarta by the application, independent of cron's timezone.
+# Use this OR the Compose scheduler profile; do not needlessly install both.
+* * * * * /usr/bin/docker compose --project-directory /ABSOLUTE/PATH/backend-careeros -f /ABSOLUTE/PATH/backend-careeros/compose.staging.yml exec -T backend python -m app.crawler.dispatcher --once >> /ABSOLUTE/WRITABLE/PATH/crawler-dispatcher.log 2>&1

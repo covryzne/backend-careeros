@@ -7,7 +7,7 @@ Google secrets into backend settings.
 
 Staging API now uses Supabase Auth user JWT verification. See [STAGING.md](STAGING.md) for setup, ownership, seeding and server deployment. Historical local-only rollout notes below do not supersede that staging authentication contract.
 
-Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Apply Alembic head, start the existing API, and run `.venv/Scripts/python.exe -m app.crawler.worker` in another terminal. Scheduling and CSV import are deferred. No second crawler HTTP service is needed.
+Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Phase B adds the shared dispatcher and owner-scoped queue described below; CSV import remains separate. No second crawler HTTP service is needed.
 
 FastAPI modular monolith with PostgreSQL persistence, shared business services and a disabled-by-default bounded agent foundation. Local/private rollout; production authentication is not yet configured and production startup fails closed.
 
@@ -220,3 +220,175 @@ owner exclusively from the verified token; a different expected account returns
 header cannot select another owner or bypass authentication. Clients without it
 retain the existing contract. The dashboard sends it after verifying its session
 so an old tab cannot silently submit an account-A form using account-B cookies.
+
+### Phase B: owner queue, fixed schedules and retry
+
+Implemented on dev on 2026-11-08. Schedule choices are **05:00 and/or 17:00 WIB**,
+one configuration per owner. Manual never pauses or advances a schedule. One
+queued/running run per owner is enforced by a partial unique index. Other owners
+can enqueue even while slots are occupied. Different-owner requests are FIFO;
+an owner's additional manual submission returns its existing active run with a
+durable idempotency receipt, keeping that run's original configuration.
+
+Migration `0022_crawler_scheduling_queue` follows `0021_single_login_session`.
+It adds schedules/occurrence receipts, request receipts and run attempts, replaces
+the global queued/running index with per-owner and running-slot indexes, and
+supports 1..8 execution slots. Default capacity remains 1. Each worker handles one
+run at a time with an independent browser process. More replicas alone do not
+increase the configured global capacity. Worker startup sets the shared capacity;
+use the same `CRAWLER_MAX_CONCURRENCY` on all worker replicas. Shrinking below an
+occupied slot is refused. Expired leases retain their browser slots until verified
+cleanup/recovery; they are never automatically stolen. Tokens increase across
+retry attempts even when a different execution slot is selected.
+
+Before migration, drain queued/running work, verify browser cleanup, and stop old
+workers plus API writers during the schema change. Migration refuses active runs
+or retained slots. Back up the intended database using your normal procedure,
+then run Alembic on that environment. Do not run old workers against the new queue.
+The implementation was verified only on disposable local PostgreSQL; no staging
+migration or deployment is performed by editing these files.
+
+Native development, in the backend repo after applying the migration:
+
+```powershell
+$env:APP_ENV_FILE='.env.development'
+python -m alembic upgrade head
+$env:AGENT_WORKER_EMBEDDED='false'
+$env:CRAWLER_MAX_CONCURRENCY='2'
+python -m app.crawler.worker
+# Run the same worker command in a second terminal with the same environment.
+# Run dispatcher separately, continuously or once:
+python -m app.crawler.dispatcher --once
+python -m app.crawler.dispatcher
+```
+
+Staging after migration: the backend Compose profile `scheduler` starts a
+lightweight dispatcher. It checks immediately and every 60 seconds; no Chrome or
+LLM executes in it. Enable it explicitly:
+
+```bash
+docker compose -f compose.staging.yml --profile scheduler up -d --build backend crawler-dispatcher
+docker compose -f compose.staging.yml logs --tail=30 crawler-dispatcher
+```
+
+Alternatively invoke `python -m app.crawler.dispatcher --once` from one Linux cron
+every minute, inside the backend container or its configured virtual environment.
+Do not create per-user crontabs. The dispatcher persists its heartbeat; capabilities
+reports `scheduler_online` for a heartbeat within 150 seconds, and the UI warns
+when an enabled schedule has no active dispatcher. Atomic owner/schedule locks and
+unique occurrence receipts protect against competing dispatchers. Each occurrence
+is enqueued, skipped_overlap, missed, or unavailable. If an occurrence is over two
+minutes late at dispatcher invocation it is audited as missed, advancing directly
+to the next future time. All due owners are drained in short batches within one
+invocation. No historical backlog is replayed. Editing a schedule uses an expected
+version and affects only future occurrences; existing queued work is unchanged.
+
+To test two workers via crawler Compose, set BOTH values in the private backend
+`.env.staging` passed to crawler Compose (not in a committed env file):
+
+```dotenv
+CRAWLER_MAX_CONCURRENCY=2
+CRAWLER_WORKER_REPLICAS=2
+```
+
+The first is shared database execution capacity; the second starts independent
+worker containers. Keep both at 1 for the initial VM rollout. All replicas must use
+the same capacity. Each worker has its own 2 GiB memory / 1 CPU limit; these limits
+apply per replica, not to the group. Then from the crawler repo on the VM:
+
+```bash
+docker compose --env-file ../backend-careeros/.env.staging -f compose.staging.yml up -d --build --force-recreate crawler-worker
+docker compose --env-file ../backend-careeros/.env.staging -f compose.staging.yml ps
+```
+
+Use two independent browser profiles/accounts. A/B should run concurrently; C
+queues until one finishes. Watch RAM/CPU, browser errors, API latency and portal
+challenges before adopting capacity 2 operationally on a 2-vCPU VM. Keep default
+1 until that live test passes. Indeed remains subject to enabled-portal policy;
+shared Chrome profiles and new adapters are not introduced by this change.
+
+### Staging promotion and startup order
+
+Promote the matching backend, crawler and frontend changes from `dev` through
+their PRs before rebuilding. Do not deploy the new queue API with an old worker
+image: that worker can report a heartbeat while leaving new runs queued.
+
+1. Enter maintenance: prevent new writes, stop the dispatcher, let queued/running
+   work finish, verify browser cleanup, then stop workers, API and stats publisher.
+   Do not force-reset slots to pass a migration. The migration refuses active work.
+2. In the backend repo, build the new image and explicitly migrate the selected
+   staging database. Startup never applies migrations automatically:
+
+   ```bash
+   docker compose -f compose.staging.yml build backend
+   docker compose -f compose.staging.yml run --rm --no-deps backend python -m alembic upgrade head
+   docker compose -f compose.staging.yml --profile scheduler up -d --force-recreate backend crawler-dispatcher
+   ```
+
+3. In the crawler repo, rebuild/recreate the workers using the command above. The
+   image includes the backend worker source, so rebuilding the backend image alone
+   does NOT update the crawler containers. Commands above assume the server sibling
+   directory is `backend-careeros`; adjust the env path and `BACKEND_CONTEXT` if
+   your checkout names differ. For this workspace it is `careeros-backend`.
+4. If analytics was enabled, recreate its publisher with the same retained coverage
+   date and database connection. Do not change coverage to today's date:
+
+   ```bash
+   docker compose -f compose.staging.yml --profile analytics up -d --force-recreate crawler-stats
+   ```
+
+5. In the frontend repo, rebuild/recreate the UI. No new frontend Compose variables
+   or ports are needed for the schedule toggle/editor:
+
+   ```bash
+   docker compose -f compose.staging.yml up -d --build --force-recreate frontend
+   ```
+
+6. Verify dispatcher logs (`Dispatch checked`, even with zero due occurrences),
+   worker readiness, then a manual crawl with scheduling Off. Save an automatic
+   configuration and toggle On to test the next 05:00/17:00 WIB occurrence. With
+   capacity/replicas 2, two independent accounts should run and a third should
+   queue. Check both worker containers, run events, jobs ownership and VM resources.
+
+The API, dispatcher and workers must point to the SAME environment database. Use
+the configured Supabase direct/session connection; do not switch the statistics
+publisher back to the transaction pooler. `APP_ENV_FILE` inside a host terminal is
+not required inside these containers: Compose injects the selected env file. Its
+default for staging is `.env.staging`. The `scheduler` profile is an explicit opt-in;
+a plain `up -d backend` does not create a dispatcher on a fresh installation. Keep
+one shared dispatcher; using this profile does not require a host cron entry.
+
+API additions (existing auth and owner checks):
+
+- GET/PUT `/api/v1/crawler/schedule`: owned schedule or null; PUT accepts `config`,
+  `hours` (5 and/or 17), `enabled`, `expected_version` (0 to create). Stale writes 409.
+- GET `/api/v1/crawler/schedule/occurrences`: latest 20 owned occurrence outcomes.
+- POST `/api/v1/crawler/runs/{id}/retry`: required Idempotency-Key; 202 same run,
+  new attempt only for failed/partial portals. Successful portals are not repeated.
+- GET `/api/v1/crawler/runs/{id}/attempts`: attempt targets, times, errors and
+  before/after source counters. Other owners receive 404 for run resources.
+
+Retry keeps original config and date window, run ID and successful item receipts.
+Failed/discovered/rejected items can be attempted again even when the discovery
+cap was reached. Current portal availability is checked; disabled targets return
+422. A different active run for the owner blocks retry with 409. New work uses
+per-owner/global limits and FIFO order; scheduled times are never changed by retry.
+Statistics retain one historical run, distinct item outcomes and saved job identity;
+retry does not count old successes as new/duplicate again. Actual page visits can
+increase with retries. Before/after snapshots preserve previous source errors.
+
+Rollback: first stop dispatcher, drain/stop workers and confirm all browsers ended.
+Export schedule/attempt metadata before an intentional downgrade: the downgrade
+removes those new tables but preserves jobs, run history, items and events. New
+queued/running work prevents downgrade. Rebuild/deploy all three repos together;
+the private engine bridge now accepts known-ID and remaining-new-card budgets.
+
+Verification for this increment: full isolated backend suite 308 passed (20 optional
+integration cases skipped), plus 9 real local PostgreSQL queue/worker/dispatcher/retry
+integration tests run separately. Migration upgrade/downgrade and active-queue refusal
+were exercised on disposable databases. Frontend suite 49 passed (one opt-in Auth
+simulation skipped), scoped type/lint checks and production build passed. Crawler
+regressions: 85 passed. Parallel tests use fixture engine events, not live two-browser
+Azure resource measurements. The original local/staging application databases were
+not migrated by these checks. Live portal access, VM capacity 2 and deployment of the
+cron/dispatcher remain operator verification steps.

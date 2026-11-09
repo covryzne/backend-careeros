@@ -38,7 +38,15 @@ def pg():
     factory = sessionmaker(engine, expire_on_commit=False)
     with factory() as db:
         state = db.get(CrawlWorkerSlot, 1)
-        assert state.active_run_id is None
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(CrawlRun)
+                .where(CrawlRun.status.in_(["queued", "running"]))
+            )
+            == 0
+        )
+        service.configure_slots(db, 1)
         state.capabilities = [
             {
                 "platform": "linkedin",
@@ -51,12 +59,11 @@ def pg():
         db.commit()
     yield factory
     with factory() as db:
-        state = db.get(CrawlWorkerSlot, 1)
-        if state.active_run_id:
-            run = db.get(CrawlRun, state.active_run_id)
+        for run in db.scalars(select(CrawlRun).where(CrawlRun.status.in_(["queued", "running"]))):
             run.status, run.finished_at = "failed", datetime.now(UTC)
+        for state in db.scalars(select(CrawlWorkerSlot)):
             state.active_run_id = None
-            db.commit()
+        db.commit()
     engine.dispose()
 
 
@@ -97,16 +104,13 @@ def test_simultaneous_manual_enqueues_are_global_and_idempotent(pg, same_key):
     if same_key:
         assert results[0] == results[1]
     else:
-        assert sum(value == 409 for value in results) == 1
+        assert len(set(results)) == 2 and all(isinstance(value, str) for value in results)
     with pg() as db:
-        assert (
-            db.scalar(
-                select(func.count())
-                .select_from(CrawlRun)
-                .where(CrawlRun.status.in_(["queued", "running"]))
-            )
-            == 1
-        )
+        assert db.scalar(
+            select(func.count())
+            .select_from(CrawlRun)
+            .where(CrawlRun.status.in_(["queued", "running"]))
+        ) == (1 if same_key else 2)
 
 
 def test_two_workers_claim_once_and_do_not_steal_expired_execution(pg):
@@ -134,6 +138,143 @@ def test_two_workers_claim_once_and_do_not_steal_expired_execution(pg):
         assert service.claim(db, "replacement", 30) is None
         with pytest.raises(RuntimeError):
             service.guarded(db, run_id, run.worker_id, run.fencing_token + 1)
+
+
+def test_capacity_two_executes_two_owners_concurrently_and_third_queues(pg):
+    from app.models.workflow import Job
+
+    owners = [actor(pg) for _ in range(3)]
+    with pg() as db:
+        service.configure_slots(db, 2)
+        ids = [service.enqueue(db, owner, payload(max_pages=5), "parallel").id for owner in owners]
+        db.commit()
+    barrier = Barrier(2)
+
+    def claim(index):
+        with pg() as db:
+            barrier.wait(timeout=10)
+            result = service.claim(db, f"parallel-{index}", 30)
+            db.commit()
+            return result
+
+    with ThreadPoolExecutor(2) as pool:
+        claims = list(pool.map(claim, [0, 1]))
+    assert {value[0] for value in claims} == set(ids[:2])
+    with pg() as db:
+        assert service.claim(db, "parallel-third", 30) is None
+        assert db.get(CrawlRun, ids[2]).status == "queued"
+    executing = Barrier(2)
+
+    class ParallelEngine(FixtureEngine):
+        async def events(self):
+            # Neither execution can finish until both are running their engines.
+            await asyncio.to_thread(executing.wait, 10)
+            async for event in super().events():
+                if event["type"] == "source_finished":
+                    event = {**event, "state": "completed", "stop_reason": "max_pages"}
+                yield event
+
+    def execute_one(index):
+        asyncio.run(
+            execute(*claims[index], f"parallel-{index}", factory=pg, engine_factory=ParallelEngine)
+        )
+
+    with ThreadPoolExecutor(2) as pool:
+        list(pool.map(execute_one, [0, 1]))
+    with pg() as db:
+        assert all(db.get(CrawlRun, run_id).status == "completed" for run_id in ids[:2])
+        jobs = list(
+            db.scalars(select(Job).where(Job.owner_id.in_([owner.owner_id for owner in owners])))
+        )
+        assert {job.owner_id for job in jobs} == {owners[0].owner_id, owners[1].owner_id}
+        assert len(jobs) == 2
+        assert service.claim(db, "parallel-third", 30)[0] == ids[2]
+        db.commit()
+
+
+def test_two_dispatchers_publish_one_occurrence_and_manual_reuses_it(pg):
+    from app.models.crawler import CrawlScheduleOccurrence
+    from app.schemas.crawler import ScheduleSave
+    from app.services.crawler import schedules
+
+    owner = actor(pg)
+    now = datetime(2026, 11, 8, 22, 0, tzinfo=UTC)
+    with pg() as db:
+        schedule = schedules.save(
+            db,
+            owner,
+            ScheduleSave(
+                config=payload(max_pages=5), hours=[5, 17], enabled=True, expected_version=0
+            ),
+            now=now - timedelta(minutes=1),
+        )
+        schedule_id = schedule["id"]
+        db.commit()
+    barrier = Barrier(2)
+
+    def dispatch(index):
+        with pg() as db:
+            barrier.wait(timeout=10)
+            value = schedules.dispatch_one(db, schedule_id, owner.owner_id, now=now)
+            db.commit()
+            return value
+
+    with ThreadPoolExecutor(2) as pool:
+        outcomes = list(pool.map(dispatch, [0, 1]))
+    assert outcomes.count("enqueued") == 1 and outcomes.count(None) == 1
+    with pg() as db:
+        scheduled = service.active_for_owner(db, owner.owner_id)
+        assert service.enqueue(db, owner, payload(), "manual-after-schedule").id == scheduled.id
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(CrawlScheduleOccurrence)
+                .where(CrawlScheduleOccurrence.schedule_id == schedule_id)
+            )
+            == 1
+        )
+        db.commit()
+        claimed = service.claim(db, "scheduled-worker", 30)
+        db.commit()
+    asyncio.run(execute(*claimed, "scheduled-worker", factory=pg, engine_factory=FixtureEngine))
+    with pg() as db:
+        result = db.get(CrawlRun, claimed[0])
+        assert result.trigger_type == "scheduled" and result.status == "partial"
+        assert service.run_data(db, result)["jobs_new"] == 1
+
+
+def test_concurrent_retry_requests_make_one_attempt(pg):
+    from app.models.crawler import CrawlRunAttempt
+
+    owner = actor(pg)
+    with pg() as db:
+        run = service.enqueue(db, owner, payload(), "failed-run")
+        db.commit()
+        service.claim(db, "failed-worker", 30)
+        service.finish(db, run.id, "failed-worker", run.fencing_token, "fixture failure")
+        db.commit()
+        run_id = run.id
+    barrier = Barrier(2)
+
+    def retry(index):
+        with pg() as db:
+            barrier.wait(timeout=10)
+            result = service.retry(db, owner, run_id, "retry-once")
+            db.commit()
+            return result.id
+
+    with ThreadPoolExecutor(2) as pool:
+        assert list(pool.map(retry, [0, 1])) == [run_id, run_id]
+    with pg() as db:
+        assert db.get(CrawlRun, run_id).attempt_no == 2
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(CrawlRunAttempt)
+                .where(CrawlRunAttempt.run_id == run_id)
+            )
+            == 2
+        )
 
 
 class FixtureEngine:
@@ -247,9 +388,7 @@ def test_process_failure_and_unconfirmed_cleanup_retain_the_global_slot(pg):
     with pg() as db:
         assert db.get(CrawlRun, run_id).status == "running"
         assert db.get(CrawlWorkerSlot, 1).active_run_id == run_id
-        with pytest.raises(HTTPException) as conflict:
-            service.enqueue(db, owner, payload(), "new")
-        assert conflict.value.status_code == 409
+        assert service.enqueue(db, owner, payload(), "new").id == run_id
 
 
 def test_post_extraction_date_filter_and_progress_events_on_postgres(pg):

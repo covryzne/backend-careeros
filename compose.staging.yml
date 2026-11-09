@@ -63,5 +63,37 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  crawler-dispatcher:
+    # One shared scheduler for all accounts; no host crontab is needed in this mode.
+    profiles: [scheduler]
+    build:
+      context: .
+    image: careeros-backend:staging-${IMAGE_TAG:-local}
+    command: ["python", "-m", "app.crawler.dispatcher"]
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: ${APP_ENV_FILE:-.env.staging}
+        format: raw
+    environment:
+      APP_ENV: staging
+      ALLOW_LOCAL_IDENTITY: "false"
+      AGENT_RUNTIME_ALLOWED: "false"
+      AGENT_WORKER_EMBEDDED: "false"
+      AGENT_ENABLED: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   documents:

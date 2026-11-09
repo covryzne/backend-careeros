@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     crawler_browser_mode: str = Field(default="auto", pattern="^(auto|headed|headless)$")
     crawler_run_timeout_seconds: int = Field(default=3600, ge=60, le=14400)
     crawler_lease_seconds: int = Field(default=30, ge=15, le=120)
+    crawler_max_concurrency: int = Field(default=1, ge=1, le=8)
     # Deployment policy, separate from adapters installed/reported by the worker.
     crawler_enabled_portals: str = "linkedin,jobstreet,glints,dealls,kalibrr,techinasia"
     api_v1_prefix: str = "/api/v1"

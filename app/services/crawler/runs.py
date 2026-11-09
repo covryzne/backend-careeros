@@ -5,11 +5,28 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.core.config import settings
-from app.models.crawler import CrawlRun, CrawlRunSource, CrawlWorkerSlot
+from app.models.crawler import (
+    CrawlRequestReceipt,
+    CrawlRun,
+    CrawlRunAttempt,
+    CrawlRunItem,
+    CrawlRunSource,
+    CrawlScheduleOccurrence,
+    CrawlWorkerSlot,
+)
 from app.services.crawler.events import append as append_event
 from app.services.shared.idempotency import fingerprint, lock_owner
 
 ACTIVE = {"queued", "running"}
+
+
+def queue_time(db):
+    # All replicas use the database clock for FIFO ordering, not browser/host clocks.
+    return (
+        db.scalar(select(func.clock_timestamp()))
+        if db.get_bind().dialect.name == "postgresql"
+        else datetime.now(UTC)
+    )
 
 
 def utc(value):
@@ -26,8 +43,8 @@ def owned(db, actor, run_id):
     return run
 
 
-def slot(db):
-    item = db.scalar(select(CrawlWorkerSlot).where(CrawlWorkerSlot.id == 1).with_for_update())
+def slot(db, slot_id=1):
+    item = db.scalar(select(CrawlWorkerSlot).where(CrawlWorkerSlot.id == slot_id).with_for_update())
     if item is None:
         # Migration seeds this row. Never silently weaken coordination if it is missing.
         raise HTTPException(503, "Crawler migration/worker slot is not initialized")
@@ -47,6 +64,16 @@ def run_data(db, run):
     return {
         "run_id": run.id,
         "trigger_type": run.trigger_type,
+        "attempt_no": run.attempt_no,
+        "retryable_platforms": [s.platform for s in sources if s.status in {"failed", "partial"}],
+        "schedule_id": run.schedule_id,
+        "scheduled_for": db.scalar(
+            select(CrawlScheduleOccurrence.scheduled_for).where(
+                CrawlScheduleOccurrence.run_id == run.id
+            )
+        )
+        if run.schedule_id
+        else None,
         "status": run.status,
         "config": run.config,
         "queued_at": run.queued_at,
@@ -82,14 +109,65 @@ def run_data(db, run):
     }
 
 
+def active_for_owner(db, owner_id):
+    return db.scalar(
+        select(CrawlRun).where(CrawlRun.owner_id == owner_id, CrawlRun.status.in_(ACTIVE))
+    )
+
+
+def attempt(db, run):
+    return db.scalar(
+        select(CrawlRunAttempt).where(
+            CrawlRunAttempt.run_id == run.id, CrawlRunAttempt.number == run.attempt_no
+        )
+    )
+
+
+def source_snapshot(db, run):
+    return {
+        s.platform: {
+            k: getattr(s, k)
+            for k in (
+                "status",
+                "jobs_found",
+                "jobs_new",
+                "jobs_duplicate",
+                "jobs_rejected",
+                "jobs_filtered",
+                "jobs_date_unknown",
+                "detail_attempts",
+                "pages_completed",
+                "error",
+            )
+        }
+        for s in source_rows(db, run.id)
+    }
+
+
+def configure_slots(db, capacity):
+    state = slot(db)
+    occupied = db.scalar(
+        select(CrawlWorkerSlot.id)
+        .where(CrawlWorkerSlot.id > capacity, CrawlWorkerSlot.active_run_id.is_not(None))
+        .limit(1)
+    )
+    if occupied:
+        raise RuntimeError("Drain higher execution slots before reducing capacity")
+    state.capacity = capacity
+    for number in range(2, capacity + 1):
+        if db.get(CrawlWorkerSlot, number) is None:
+            db.add(CrawlWorkerSlot(id=number))
+    db.flush()
+
+
 def capabilities(db, actor):
     actor.require("jobs:read")
     state = db.get(CrawlWorkerSlot, 1)
-    current = db.get(CrawlRun, state.active_run_id) if state and state.active_run_id else None
-    online = bool(
-        state
-        and utc(state.heartbeat_at)
-        and utc(state.heartbeat_at) > datetime.now(UTC) - timedelta(seconds=15)
+    current = active_for_owner(db, actor.owner_id)
+    slots = list(db.scalars(select(CrawlWorkerSlot)))
+    online = any(
+        utc(s.heartbeat_at) and utc(s.heartbeat_at) > datetime.now(UTC) - timedelta(seconds=15)
+        for s in slots
     )
     return {
         "engine": "selenium",
@@ -99,43 +177,51 @@ def capabilities(db, actor):
         if state
         else [],
         "worker_online": online,
-        "active": bool(current or (state and state.active_run_id)),
-        "active_run_id": current.id if current and current.owner_id == actor.owner_id else None,
+        "scheduler_online": bool(
+            state
+            and utc(state.dispatcher_heartbeat_at)
+            and utc(state.dispatcher_heartbeat_at) > datetime.now(UTC) - timedelta(seconds=150)
+        ),
+        "active": current is not None,
+        "active_run_id": current.id if current else None,
+        "running_count": sum(s.active_run_id is not None for s in slots),
+        "queued_count": db.scalar(
+            select(func.count()).select_from(CrawlRun).where(CrawlRun.status == "queued")
+        )
+        or 0,
+        "execution_capacity": state.capacity if state else 1,
         "limits": {"max_pages": 20, "days": 30, "max_jobs_per_platform": 200, "keywords": 5},
     }
 
 
-def enqueue(db, actor, payload, key):
-    actor.require("jobs:write")
-    if actor.actor_type != "user":
-        raise HTTPException(403, "Crawler manual start requires a user")
+def receipt(db, actor, action, key, digest):
     if not key or not key.strip() or len(key) > 200:
         raise HTTPException(422, "Idempotency-Key is required (1..200 characters)")
-    lock_owner(db, actor)
-    config = payload.model_dump(mode="json")
-    digest = fingerprint(config)
     previous = db.scalar(
-        select(CrawlRun).where(CrawlRun.owner_id == actor.owner_id, CrawlRun.idempotency_key == key)
+        select(CrawlRequestReceipt).where(
+            CrawlRequestReceipt.owner_id == actor.owner_id,
+            CrawlRequestReceipt.action == action,
+            CrawlRequestReceipt.key == key,
+        )
     )
     if previous:
         if previous.payload_hash != digest:
             raise HTTPException(409, "Idempotency key reused with different payload")
-        return previous
-    state = slot(db)
-    if state.active_run_id or db.scalar(
-        select(CrawlRun.id).where(CrawlRun.status.in_(ACTIVE)).limit(1)
-    ):
-        current = db.get(CrawlRun, state.active_run_id) if state.active_run_id else None
-        raise HTTPException(
-            409,
-            {
-                "code": "CRAWLER_BUSY",
-                "message": "Another crawl is queued, running, or awaiting safe recovery.",
-                "active_run_id": str(current.id)
-                if current and current.owner_id == actor.owner_id
-                else None,
-            },
+        return db.get(CrawlRun, previous.run_id)
+    return None
+
+
+def save_receipt(db, actor, action, key, digest, run):
+    db.add(
+        CrawlRequestReceipt(
+            owner_id=actor.owner_id, action=action, key=key, payload_hash=digest, run_id=run.id
         )
+    )
+    db.flush()
+
+
+def validated_config(db, payload):
+    state = slot(db)
     installed = {c["platform"]: c for c in state.capabilities}
     for platform in payload.platforms:
         if platform not in settings.enabled_crawler_portals():
@@ -156,50 +242,200 @@ def enqueue(db, actor, payload, key):
         and payload.linkedin_geo_id == "102478259"
     ):
         raise HTTPException(422, "Custom LinkedIn location needs the corresponding linkedin_geo_id")
-    config["adapter_capabilities"] = [installed[p] for p in payload.platforms]
-    config["post_filter_days"] = True  # Versioned snapshot: do not reinterpret historical runs.
+    return {
+        **payload.model_dump(mode="json"),
+        "adapter_capabilities": [installed[p] for p in payload.platforms],
+        "post_filter_days": True,
+    }
+
+
+def new_run(db, actor, config, key, digest, trigger="manual", schedule_id=None):
+    now = queue_time(db)
     run = CrawlRun(
         id=uuid.uuid4(),
         owner_id=actor.owner_id,
         idempotency_key=key,
         payload_hash=digest,
         config=config,
-        trigger_type="manual",
+        trigger_type=trigger,
         status="queued",
+        schedule_id=schedule_id,
+        attempt_no=1,
+        enqueued_at=now,
     )
     db.add(run)
     db.flush()
-    for platform in payload.platforms:
+    for platform in config["platforms"]:
         db.add(CrawlRunSource(run_id=run.id, platform=platform))
-    state.active_run_id = run.id
+    db.add(
+        CrawlRunAttempt(
+            run_id=run.id,
+            number=1,
+            kind="initial",
+            platforms=config["platforms"],
+            status="queued",
+            sources_before={},
+            sources_after={},
+        )
+    )
     db.flush()
-    append_event(db, run, "Run manual masuk antrean. Menunggu worker crawler.")
+    append_event(db, run, f"Run {trigger} masuk antrean. Menunggu slot worker tersedia.")
+    return run
+
+
+def enqueue(db, actor, payload, key):
+    actor.require("jobs:write")
+    if actor.actor_type != "user":
+        raise HTTPException(403, "Crawler manual start requires a user")
+    lock_owner(db, actor)
+    digest = fingerprint(payload.model_dump(mode="json"))
+    previous = receipt(db, actor, "manual", key, digest)
+    if previous:
+        return previous
+    # Preserve idempotent receipts created before the queue migration.
+    previous = db.scalar(
+        select(CrawlRun).where(CrawlRun.owner_id == actor.owner_id, CrawlRun.idempotency_key == key)
+    )
+    if previous:
+        if previous.payload_hash != digest:
+            raise HTTPException(409, "Idempotency key reused with different payload")
+        return previous
+    config = validated_config(db, payload)
+    current = active_for_owner(db, actor.owner_id)
+    run = current or new_run(db, actor, config, key, digest)
+    save_receipt(db, actor, "manual", key, digest, run)
+    return run
+
+
+def retry(db, actor, run_id, key):
+    actor.require("jobs:write")
+    if actor.actor_type != "user":
+        raise HTTPException(403, "Retry requires a user")
+    lock_owner(db, actor)
+    run = owned(db, actor, run_id)
+    digest = fingerprint(str(run.id))
+    previous = receipt(db, actor, "retry", key, digest)
+    if previous:
+        return previous
+    slot(db)
+    current = active_for_owner(db, actor.owner_id)
+    if current:
+        if current.id != run.id:
+            raise HTTPException(409, "Finish the current crawl before retrying an older run")
+        save_receipt(db, actor, "retry", key, digest, run)
+        return run
+    targets = [s for s in source_rows(db, run.id) if s.status in {"failed", "partial"}]
+    if not targets:
+        raise HTTPException(409, "No failed or partial portals to retry")
+    from app.schemas.crawler import CrawlCreate
+
+    values = {name: run.config[name] for name in CrawlCreate.model_fields if name in run.config}
+    values["platforms"] = [s.platform for s in targets]
+    validated_config(db, CrawlCreate(**values))  # Current portal policy still applies.
+    before = source_snapshot(db, run)
+    old = attempt(db, run)
+    if old is None:
+        old = CrawlRunAttempt(
+            run_id=run.id,
+            number=run.attempt_no,
+            kind="initial",
+            platforms=run.config["platforms"],
+            status=run.status,
+            queued_at=run.queued_at,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            error=run.error,
+            sources_before={},
+            sources_after=before,
+        )
+        db.add(old)
+    elif not old.sources_after:
+        old.sources_after = before
+    for source in targets:
+        for item in db.scalars(
+            select(CrawlRunItem).where(
+                CrawlRunItem.run_id == run.id,
+                CrawlRunItem.platform == source.platform,
+                CrawlRunItem.status.in_(["failed", "rejected", "discovered"]),
+            )
+        ):
+            if item.status == "rejected":
+                source.jobs_rejected -= 1
+            item.status, item.error = "discovered", None
+        source.status, source.error, source.finished_at = "queued", None, None
+    run.attempt_no += 1
+    run.status, run.error, run.finished_at = "queued", None, None
+    run.enqueued_at = queue_time(db)
+    db.add(
+        CrawlRunAttempt(
+            run_id=run.id,
+            number=run.attempt_no,
+            kind="retry",
+            platforms=[s.platform for s in targets],
+            status="queued",
+            sources_before=before,
+            sources_after={},
+        )
+    )
+    save_receipt(db, actor, "retry", key, digest, run)
+    append_event(
+        db,
+        run,
+        f"Percobaan {run.attempt_no}: retry portal bermasalah ({', '.join(s.platform for s in targets)}).",
+    )
     return run
 
 
 def claim(db, worker_id, lease_seconds):
-    state = slot(db)
-    if state.active_run_id is None:
+    coordinator = slot(db)
+    # Never reuse a worker/slot with an uncertain running browser, even after expiry.
+    if db.scalar(
+        select(CrawlWorkerSlot.id).where(
+            CrawlWorkerSlot.worker_id == worker_id, CrawlWorkerSlot.active_run_id.is_not(None)
+        )
+    ):
         return None
-    run = db.scalar(select(CrawlRun).where(CrawlRun.id == state.active_run_id).with_for_update())
-    # Stale RUNNING is not reclaimed. A browser may still be alive.
-    if run is None or run.status != "queued":
+    available = db.scalar(
+        select(CrawlWorkerSlot)
+        .where(CrawlWorkerSlot.id <= coordinator.capacity, CrawlWorkerSlot.active_run_id.is_(None))
+        .order_by(CrawlWorkerSlot.id)
+        .with_for_update()
+    )
+    if available is None:
+        return None
+    run = db.scalar(
+        select(CrawlRun)
+        .where(CrawlRun.status == "queued")
+        .order_by(CrawlRun.enqueued_at, CrawlRun.id)
+        .limit(1)
+        .with_for_update()
+    )
+    if run is None:
         return None
     now = datetime.now(UTC)
-    state.fencing_token += 1
-    state.worker_id = worker_id
-    state.heartbeat_at = now
-    run.status, run.worker_id, run.fencing_token = "running", worker_id, state.fencing_token
-    run.started_at = run.heartbeat_at = now
-    run.lease_until = now + timedelta(seconds=lease_seconds)
+    # Tokens remain monotonic for this run even when a retry uses another slot.
+    available.fencing_token = max(available.fencing_token, run.fencing_token) + 1
+    available.worker_id, available.heartbeat_at, available.active_run_id = worker_id, now, run.id
+    run.execution_slot = available.id
+    run.status, run.worker_id, run.fencing_token = "running", worker_id, available.fencing_token
+    run.started_at = run.started_at or now
+    run.heartbeat_at, run.lease_until = now, now + timedelta(seconds=lease_seconds)
+    current = attempt(db, run)
+    if current:
+        current.status, current.started_at = "running", now
     db.flush()
-    append_event(db, run, "Worker mengambil run. Memulai pencarian lowongan.")
+    append_event(
+        db,
+        run,
+        f"Worker mengambil percobaan {run.attempt_no} pada slot {available.id}. Memulai pencarian lowongan.",
+    )
     return run.id, run.fencing_token
 
 
 def guarded(db, run_id, worker_id, token, *, lease=True):
-    state = slot(db)
+    slot(db)
     run = db.scalar(select(CrawlRun).where(CrawlRun.id == run_id).with_for_update())
+    state = slot(db, run.execution_slot) if run else None
     if (
         not run
         or state.active_run_id != run_id
@@ -223,6 +459,7 @@ def heartbeat(db, run_id, worker_id, token, lease_seconds):
 def finish(db, run_id, worker_id, token, error=None):
     run, state = guarded(db, run_id, worker_id, token, lease=False)
     sources = source_rows(db, run_id)
+    current_attempt = attempt(db, run)
     for source in sources:
         if source.status in ACTIVE:
             source.status = "partial" if source.jobs_new + source.jobs_duplicate else "failed"
@@ -236,6 +473,13 @@ def finish(db, run_id, worker_id, token, error=None):
     )
     run.finished_at = datetime.now(UTC)
     run.lease_until = None
+    if current_attempt:
+        current_attempt.status, current_attempt.finished_at, current_attempt.error = (
+            run.status,
+            run.finished_at,
+            run.error,
+        )
+        current_attempt.sources_after = source_snapshot(db, run)
     state.active_run_id = None
     db.flush()
     append_event(
