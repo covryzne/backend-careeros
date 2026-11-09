@@ -7,7 +7,7 @@ Google secrets into backend settings.
 
 Staging API now uses Supabase Auth user JWT verification. See [STAGING.md](STAGING.md) for setup, ownership, seeding and server deployment. Historical local-only rollout notes below do not supersede that staging authentication contract.
 
-Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Apply Alembic head, start the existing API, and run `.venv/Scripts/python.exe -m app.crawler.worker` in another terminal. Scheduling and CSV import are deferred. No second crawler HTTP service is needed.
+Manual Selenium crawling (Phase A) uses the **local PostgreSQL** database and a separate worker, with page/day/job limits configurable from Job Crawler. Follow [the Phase A contract and local runbook](../specs-careeros/CRAWLER_PHASE_A.md). Phase B adds the shared dispatcher and owner-scoped queue described below; CSV import remains separate. No second crawler HTTP service is needed.
 
 FastAPI modular monolith with PostgreSQL persistence, shared business services and a disabled-by-default bounded agent foundation. Local/private rollout; production authentication is not yet configured and production startup fails closed.
 
@@ -283,11 +283,22 @@ to the next future time. All due owners are drained in short batches within one
 invocation. No historical backlog is replayed. Editing a schedule uses an expected
 version and affects only future occurrences; existing queued work is unchanged.
 
-To test two workers via crawler Compose, set `CRAWLER_MAX_CONCURRENCY=2` in the
-backend env passed to crawler Compose, then from the crawler repo on the VM:
+To test two workers via crawler Compose, set BOTH values in the private backend
+`.env.staging` passed to crawler Compose (not in a committed env file):
+
+```dotenv
+CRAWLER_MAX_CONCURRENCY=2
+CRAWLER_WORKER_REPLICAS=2
+```
+
+The first is shared database execution capacity; the second starts independent
+worker containers. Keep both at 1 for the initial VM rollout. All replicas must use
+the same capacity. Each worker has its own 2 GiB memory / 1 CPU limit; these limits
+apply per replica, not to the group. Then from the crawler repo on the VM:
 
 ```bash
-docker compose --env-file ../backend-careeros/.env.staging -f compose.staging.yml up -d --build --scale crawler-worker=2
+docker compose --env-file ../backend-careeros/.env.staging -f compose.staging.yml up -d --build --force-recreate crawler-worker
+docker compose --env-file ../backend-careeros/.env.staging -f compose.staging.yml ps
 ```
 
 Use two independent browser profiles/accounts. A/B should run concurrently; C
@@ -295,6 +306,57 @@ queues until one finishes. Watch RAM/CPU, browser errors, API latency and portal
 challenges before adopting capacity 2 operationally on a 2-vCPU VM. Keep default
 1 until that live test passes. Indeed remains subject to enabled-portal policy;
 shared Chrome profiles and new adapters are not introduced by this change.
+
+### Staging promotion and startup order
+
+Promote the matching backend, crawler and frontend changes from `dev` through
+their PRs before rebuilding. Do not deploy the new queue API with an old worker
+image: that worker can report a heartbeat while leaving new runs queued.
+
+1. Enter maintenance: prevent new writes, stop the dispatcher, let queued/running
+   work finish, verify browser cleanup, then stop workers, API and stats publisher.
+   Do not force-reset slots to pass a migration. The migration refuses active work.
+2. In the backend repo, build the new image and explicitly migrate the selected
+   staging database. Startup never applies migrations automatically:
+
+   ```bash
+   docker compose -f compose.staging.yml build backend
+   docker compose -f compose.staging.yml run --rm --no-deps backend python -m alembic upgrade head
+   docker compose -f compose.staging.yml --profile scheduler up -d --force-recreate backend crawler-dispatcher
+   ```
+
+3. In the crawler repo, rebuild/recreate the workers using the command above. The
+   image includes the backend worker source, so rebuilding the backend image alone
+   does NOT update the crawler containers. Commands above assume the server sibling
+   directory is `backend-careeros`; adjust the env path and `BACKEND_CONTEXT` if
+   your checkout names differ. For this workspace it is `careeros-backend`.
+4. If analytics was enabled, recreate its publisher with the same retained coverage
+   date and database connection. Do not change coverage to today's date:
+
+   ```bash
+   docker compose -f compose.staging.yml --profile analytics up -d --force-recreate crawler-stats
+   ```
+
+5. In the frontend repo, rebuild/recreate the UI. No new frontend Compose variables
+   or ports are needed for the schedule toggle/editor:
+
+   ```bash
+   docker compose -f compose.staging.yml up -d --build --force-recreate frontend
+   ```
+
+6. Verify dispatcher logs (`Dispatch checked`, even with zero due occurrences),
+   worker readiness, then a manual crawl with scheduling Off. Save an automatic
+   configuration and toggle On to test the next 05:00/17:00 WIB occurrence. With
+   capacity/replicas 2, two independent accounts should run and a third should
+   queue. Check both worker containers, run events, jobs ownership and VM resources.
+
+The API, dispatcher and workers must point to the SAME environment database. Use
+the configured Supabase direct/session connection; do not switch the statistics
+publisher back to the transaction pooler. `APP_ENV_FILE` inside a host terminal is
+not required inside these containers: Compose injects the selected env file. Its
+default for staging is `.env.staging`. The `scheduler` profile is an explicit opt-in;
+a plain `up -d backend` does not create a dispatcher on a fresh installation. Keep
+one shared dispatcher; using this profile does not require a host cron entry.
 
 API additions (existing auth and owner checks):
 

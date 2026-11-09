@@ -65,6 +65,7 @@ services:
         max-file: "3"
 
   crawler-dispatcher:
+    # One shared scheduler for all accounts; no host crontab is needed in this mode.
     profiles: [scheduler]
     build:
       context: .
@@ -81,6 +82,9 @@ services:
       AGENT_RUNTIME_ALLOWED: "false"
       AGENT_WORKER_EMBEDDED: "false"
       AGENT_ENABLED: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 256m
