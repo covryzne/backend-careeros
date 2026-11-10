@@ -319,14 +319,55 @@ shared Chrome profiles and new adapters are not introduced by this change.
 
 ### Production worker settings
 
+Before promoting or deploying, run the cross-repository, read-only preflight from
+the host (Python 3.11+ and Docker Compose required; the Docker daemon is not needed
+for this config check). Both server and local checkout naming conventions work:
+
+```bash
+# From the backend repo, using templates only before promotion:
+python scripts/verify_deployment.py --environment production --examples
+python scripts/verify_deployment.py --environment staging --examples
+
+# On the VM, after filling backend/frontend private .env.production files:
+python scripts/verify_deployment.py --environment production
+```
+
+It checks all three resolved Compose configurations: required services/profiles,
+environment, database consistency, Auth mode/project/origin, backend network and
+internal URL, worker capacity/browser mode, document mount, encryption-key format
+and the configured coverage date. Private mode also catches the known transaction
+pooler incompatibility with the statistics publisher's session lock. Different
+replica and capacity counts are allowed, with a note about concurrency limits.
+No resolved config or credentials are printed. It never migrates databases, builds
+images, starts containers or changes env files. This checks configured values,
+not connectivity, signatures, the retained database coverage or the currently
+built image. Complete the worker-image smoke test, migration/coverage query,
+document-write and live HTTPS/login/crawl checks on the VM before opening access.
+
 The updated worker accepts `APP_ENV=production`. Deployed workers require
 `ALLOW_LOCAL_IDENTITY=false`, `LOCAL_AUTH_ENABLED=false` and
 `AGENT_WORKER_EMBEDDED=false`. It uses internal queue ownership rather than a
 browser login; API Supabase JWT checks remain unchanged. Promote this backend
 source through staging to main, then rebuild the crawler image, which embeds the
 backend worker. Pulling source or rebuilding only the API does not update an
-existing crawler image. Production dispatcher/stats and replica/browser-mode
-Compose alignment remain separate deployment prerequisites.
+existing crawler image. Production Compose includes the same opt-in `scheduler`
+and `analytics` services as staging. Production crawler Compose reads replica count
+and browser mode from the backend env supplied with `--env-file`. Preserve the
+production project names, `.env.production`, ports and named volumes; staging and
+production remain separate deployments.
+
+After promoting these changes to main, pulling them on the VM, building matching
+images and completing migration/coverage setup, run from the server parent folder:
+
+```bash
+docker compose -f backend-careeros/compose.production.yml --profile scheduler --profile analytics config --services
+docker compose -f backend-careeros/compose.production.yml --profile scheduler --profile analytics up -d --force-recreate backend crawler-dispatcher crawler-stats
+docker compose --env-file backend-careeros/.env.production -f crawler-careeros/compose.production.yml up -d --force-recreate crawler-worker
+```
+
+The first command must list all three backend services. Do not run the startup
+command against an old Compose file that lists only `backend`. Keep the declared
+production statistics coverage date unchanged across recreations.
 
 ### Staging promotion and startup order
 
