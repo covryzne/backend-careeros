@@ -317,6 +317,17 @@ challenges before adopting capacity 2 operationally on a 2-vCPU VM. Keep default
 1 until that live test passes. Indeed remains subject to enabled-portal policy;
 shared Chrome profiles and new adapters are not introduced by this change.
 
+### Production worker settings
+
+The updated worker accepts `APP_ENV=production`. Deployed workers require
+`ALLOW_LOCAL_IDENTITY=false`, `LOCAL_AUTH_ENABLED=false` and
+`AGENT_WORKER_EMBEDDED=false`. It uses internal queue ownership rather than a
+browser login; API Supabase JWT checks remain unchanged. Promote this backend
+source through staging to main, then rebuild the crawler image, which embeds the
+backend worker. Pulling source or rebuilding only the API does not update an
+existing crawler image. Production dispatcher/stats and replica/browser-mode
+Compose alignment remain separate deployment prerequisites.
+
 ### Staging promotion and startup order
 
 Promote the matching backend, crawler and frontend changes from `dev` through
