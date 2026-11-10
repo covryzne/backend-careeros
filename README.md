@@ -17,8 +17,18 @@ FastAPI modular monolith with PostgreSQL persistence, shared business services a
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-Copy-Item .env.example .env
+Copy-Item .env.development.example .env.development
+$env:APP_ENV_FILE = '.env.development'
 ```
+
+Versioned `.env*.example` files contain placeholders only. Development templates
+use local PostgreSQL and local accounts; `.env.google.example` supplies the
+alternative Supabase Auth mode while keeping that database local. Set the same
+auth mode on the frontend. Staging/production templates use their own HTTPS origin
+and Auth/database placeholders. Fill private env files yourself; they remain
+ignored. Never copy production credentials into an example. Production runtime
+prerequisites are called out in its template; editing a template does not enable
+unsupported worker/Compose behavior.
 
 Configure `DATABASE_URL` locally. Before upgrading existing data, follow the backup/restore verification procedure in [the foundation runbook](../specs-careeros/FOUNDATION_IMPLEMENTATION.md). No reseed is needed.
 
