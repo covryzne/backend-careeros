@@ -240,10 +240,13 @@ def recover(run_id):
 
 
 def validate_worker_settings():
-    if settings.app_env not in {"development", "test", "staging"}:
-        raise RuntimeError("Crawler worker supports development/test/staging only")
-    if settings.app_env == "staging" and settings.allow_local_identity:
-        raise RuntimeError("Staging worker requires ALLOW_LOCAL_IDENTITY=false")
+    if settings.app_env not in {"development", "test", "staging", "production"}:
+        raise RuntimeError("Unsupported crawler worker environment")
+    if settings.app_env in {"staging", "production"}:
+        if settings.allow_local_identity:
+            raise RuntimeError("Deployed worker requires ALLOW_LOCAL_IDENTITY=false")
+        if settings.local_auth_enabled:
+            raise RuntimeError("Deployed worker requires LOCAL_AUTH_ENABLED=false")
     if settings.agent_worker_embedded:
         raise RuntimeError("Separate crawler worker requires AGENT_WORKER_EMBEDDED=false")
 
