@@ -1,4 +1,4 @@
-"""Staging worker configuration and graceful stop without database or browser calls."""
+"""Worker configuration and graceful stop without database or browser calls."""
 
 import asyncio
 import signal
@@ -9,24 +9,33 @@ from app.core.config import settings
 from app.crawler import worker
 
 
-def test_staging_worker_allows_internal_execution_without_user_login(monkeypatch):
-    monkeypatch.setattr(settings, "app_env", "staging")
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_deployed_worker_allows_internal_execution_without_user_login(monkeypatch, environment):
+    monkeypatch.setattr(settings, "app_env", environment)
     monkeypatch.setattr(settings, "allow_local_identity", False)
+    monkeypatch.setattr(settings, "local_auth_enabled", False)
     monkeypatch.setattr(settings, "agent_worker_embedded", False)
     worker.validate_worker_settings()
 
 
 @pytest.mark.parametrize(
-    "environment,local,embedded",
+    "environment,local,local_auth,embedded",
     [
-        ("production", False, False),
-        ("staging", True, False),
-        ("staging", False, True),
+        ("unsupported", False, False, False),
+        ("staging", True, False, False),
+        ("staging", False, True, False),
+        ("staging", False, False, True),
+        ("production", True, False, False),
+        ("production", False, True, False),
+        ("production", False, False, True),
     ],
 )
-def test_unsupported_or_misconfigured_worker_fails(monkeypatch, environment, local, embedded):
+def test_unsupported_or_misconfigured_worker_fails(
+    monkeypatch, environment, local, local_auth, embedded
+):
     monkeypatch.setattr(settings, "app_env", environment)
     monkeypatch.setattr(settings, "allow_local_identity", local)
+    monkeypatch.setattr(settings, "local_auth_enabled", local_auth)
     monkeypatch.setattr(settings, "agent_worker_embedded", embedded)
     with pytest.raises(RuntimeError):
         worker.validate_worker_settings()
